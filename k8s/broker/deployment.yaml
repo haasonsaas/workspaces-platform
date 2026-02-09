@@ -28,9 +28,64 @@ spec:
                   name: capability-broker-secrets
                   key: admin_token
                   optional: true
+            # GitHub App integration (broker-only writes). Optional, but required to enable /v1/github/open-pr.
+            - name: GITHUB_APP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: capability-broker-github-app
+                  key: app_id
+                  optional: true
+            - name: GITHUB_APP_INSTALLATION_ID
+              valueFrom:
+                secretKeyRef:
+                  name: capability-broker-github-app
+                  key: installation_id
+                  optional: true
+            - name: GITHUB_APP_PRIVATE_KEY_FILE
+              value: /etc/github-app/private-key.pem
+            - name: GITHUB_REPO_ALLOWLIST
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: github_repo_allowlist
+                  optional: true
+            - name: GITHUB_DEFAULT_BASE_BRANCH
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: github_default_base_branch
+                  optional: true
+            - name: GITHUB_BASE_BRANCH_ALLOWLIST
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: github_base_branch_allowlist
+                  optional: true
+            - name: GITHUB_BRANCH_PREFIX
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: github_branch_prefix
+                  optional: true
+            - name: GITHUB_GIT_AUTHOR_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: github_git_author_name
+                  optional: true
+            - name: GITHUB_GIT_AUTHOR_EMAIL
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: github_git_author_email
+                  optional: true
           ports:
             - name: http
               containerPort: 8080
+          volumeMounts:
+            - name: github-app
+              mountPath: /etc/github-app
+              readOnly: true
           livenessProbe:
             httpGet:
               path: /healthz
@@ -39,6 +94,11 @@ spec:
             httpGet:
               path: /readyz
               port: 8080
+      volumes:
+        - name: github-app
+          secret:
+            secretName: capability-broker-github-app
+            optional: true
 ---
 apiVersion: v1
 kind: Service
@@ -52,4 +112,3 @@ spec:
     - name: http
       port: 8080
       targetPort: 8080
-

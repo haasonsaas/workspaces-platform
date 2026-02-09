@@ -32,5 +32,24 @@ If the gateway cannot reach cluster Services directly, the clean approach is:
 
 That command can be used in `ProxyCommand` the same way as `nc`.
 
-This repo doesn't implement that gateway binary yet.
+This repo implements it as `ws-proxy` (`cmd/ws-proxy`).
 
+Example SSH config:
+```sshconfig
+Host ws-gateway
+  HostName <tailscale-ip-or-hostname>
+  User <tailscale-ssh-user>
+
+Host desk-jonathan
+  HostName desktop-jonathan-ssh.desktops.svc.cluster.local
+  User jonathan
+  ProxyCommand ssh ws-gateway -- ws-proxy %h %p
+  StrictHostKeyChecking accept-new
+```
+
+`ws-proxy` parses the host as `<service>.<namespace>...`, finds the Service selector, picks a ready pod, then port-forwards to the pod and proxies bytes.
+
+Gateway kubeconfig RBAC needs (minimum):
+- `get` Services in the desktop namespaces
+- `list` Pods in the desktop namespaces
+- `create` on `pods/portforward` in the desktop namespaces

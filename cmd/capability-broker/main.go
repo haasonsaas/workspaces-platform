@@ -25,6 +25,8 @@ type server struct {
 	k8s client.Client
 
 	adminToken string
+
+	gh *githubService
 }
 
 func main() {
@@ -43,7 +45,12 @@ func main() {
 		log.Fatalf("k8s client: %v", err)
 	}
 
-	s := &server{k8s: k8sClient, adminToken: adminToken}
+	ghSvc, ghErr := newGitHubServiceFromEnv()
+	if ghErr != nil {
+		log.Printf("github integration disabled: %v", ghErr)
+	}
+
+	s := &server{k8s: k8sClient, adminToken: adminToken, gh: ghSvc}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -58,14 +65,7 @@ func main() {
 		r.Post("/network-grants", s.handleCreateNetworkGrant)
 		r.Post("/network-grants/{namespace}/{name}/approve", s.handleApproveNetworkGrant)
 
-		// MVP placeholder. The broker is the only component allowed to write to GitHub,
-		// but wiring a full GitHub App flow is out-of-scope for the initial operator skeleton.
-		r.Post("/github/open-pr", func(w http.ResponseWriter, _ *http.Request) {
-			writeJSON(w, http.StatusNotImplemented, map[string]any{
-				"error": "not_implemented",
-				"hint":  "Implement broker-only PR creation using a GitHub App installation token.",
-			})
-		})
+		r.Post("/github/open-pr", s.handleGitHubOpenPR)
 	})
 
 	log.Printf("capability-broker listening on %s", listenAddr)

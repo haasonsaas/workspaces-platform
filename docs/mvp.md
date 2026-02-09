@@ -59,6 +59,8 @@ The operator creates:
 - a `Deployment` (`desktop-<name>`) with `strategy: Recreate`
 - a `Service` (`desktop-<name>-ssh`)
 
+Access is via a Tailscale SSH gateway. See `docs/access.md` for SSH/VS Code Remote wiring.
+
 ## 5. Create An Agent Job (Kata)
 
 Example `AgentJob`:
@@ -98,4 +100,6 @@ Broker does:
 - `POST /v1/network-grants` (create unapproved grant request)
 - `POST /v1/network-grants/{namespace}/{name}/approve` (admin approve)
 
-`POST /v1/github/open-pr` is currently a stub (returns 501) and should be implemented next using a GitHub App.
+`POST /v1/github/open-pr` is implemented using a GitHub App installation token. To enable it, configure:
+- `capability-broker-github-app` Secret (keys: `app_id`, `installation_id`, `private-key.pem`)
+- `capability-broker-config` ConfigMap (set `github_repo_allowlist`)

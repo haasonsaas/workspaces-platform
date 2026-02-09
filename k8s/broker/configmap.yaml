@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: capability-broker-config
+  namespace: workspaces-system
+data:
+  # Comma-separated allowlist of owner/repo entries. Empty => GitHub integration disabled (secure default).
+  github_repo_allowlist: ""
+
+  # Base branch defaults/constraints.
+  github_default_base_branch: "main"
+  github_base_branch_allowlist: "main"
+
+  # Branch naming policy for broker-created PR branches.
+  github_branch_prefix: "agent/"
+
+  # Commit identity used by the broker.
+  github_git_author_name: "workspaces-broker"
+  github_git_author_email: "workspaces-broker@localhost"
+

@@ -1,0 +1,594 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/hex"
+	"encoding/json"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/golang-jwt/jwt/v5"
+)
+
+type githubService struct {
+	apiBase string
+	gitBase string
+
+	appID          int64
+	installationID int64
+	privateKey     *rsa.PrivateKey
+
+	repoAllowlist map[string]struct{}
+
+	defaultBase  string
+	allowedBases map[string]struct{}
+
+	branchPrefix string
+
+	authorName  string
+	authorEmail string
+
+	httpClient *http.Client
+
+	mu           sync.Mutex
+	cachedToken  string
+	cachedExpiry time.Time
+}
+
+func newGitHubServiceFromEnv() (*githubService, error) {
+	appID, ok, err := envInt64("GITHUB_APP_ID")
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("GITHUB_APP_ID not set")
+	}
+
+	installationID, ok, err := envInt64("GITHUB_APP_INSTALLATION_ID")
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("GITHUB_APP_INSTALLATION_ID not set")
+	}
+
+	keyBytes, err := loadKeyMaterialFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	key, err := parseRSAPrivateKey(keyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse GitHub app private key: %w", err)
+	}
+
+	repoAllowlist := parseCSVSet(os.Getenv("GITHUB_REPO_ALLOWLIST"))
+	if len(repoAllowlist) == 0 {
+		return nil, errors.New("GITHUB_REPO_ALLOWLIST is empty (secure default: deny all)")
+	}
+
+	defaultBase := getenv("GITHUB_DEFAULT_BASE_BRANCH", "main")
+	allowedBases := parseCSVSet(getenv("GITHUB_BASE_BRANCH_ALLOWLIST", defaultBase))
+	if len(allowedBases) == 0 {
+		return nil, errors.New("GITHUB_BASE_BRANCH_ALLOWLIST is empty")
+	}
+
+	branchPrefix := getenv("GITHUB_BRANCH_PREFIX", "agent/")
+
+	apiBase := strings.TrimRight(getenv("GITHUB_API_URL", "https://api.github.com"), "/")
+	gitBase := strings.TrimRight(getenv("GITHUB_GIT_URL", "https://github.com"), "/")
+
+	authorName := getenv("GITHUB_GIT_AUTHOR_NAME", "workspaces-broker")
+	authorEmail := getenv("GITHUB_GIT_AUTHOR_EMAIL", "workspaces-broker@localhost")
+
+	return &githubService{
+		apiBase:        apiBase,
+		gitBase:        gitBase,
+		appID:          appID,
+		installationID: installationID,
+		privateKey:     key,
+		repoAllowlist:  repoAllowlist,
+		defaultBase:    defaultBase,
+		allowedBases:   allowedBases,
+		branchPrefix:   branchPrefix,
+		authorName:     authorName,
+		authorEmail:    authorEmail,
+		httpClient:     &http.Client{Timeout: 30 * time.Second},
+		cachedToken:    "",
+		cachedExpiry:   time.Time{},
+	}, nil
+}
+
+func loadKeyMaterialFromEnv() ([]byte, error) {
+	if pemText := os.Getenv("GITHUB_APP_PRIVATE_KEY_PEM"); pemText != "" {
+		return []byte(pemText), nil
+	}
+	if path := os.Getenv("GITHUB_APP_PRIVATE_KEY_FILE"); path != "" {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read GITHUB_APP_PRIVATE_KEY_FILE: %w", err)
+		}
+		return b, nil
+	}
+	return nil, errors.New("missing GitHub key material: set GITHUB_APP_PRIVATE_KEY_PEM or GITHUB_APP_PRIVATE_KEY_FILE")
+}
+
+func parseRSAPrivateKey(pemBytes []byte) (*rsa.PrivateKey, error) {
+	block, _ := pem.Decode(pemBytes)
+	if block == nil {
+		return nil, errors.New("invalid PEM")
+	}
+	switch block.Type {
+	case "RSA PRIVATE KEY":
+		return x509.ParsePKCS1PrivateKey(block.Bytes)
+	default:
+		k, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if err != nil {
+			return nil, err
+		}
+		rsaKey, ok := k.(*rsa.PrivateKey)
+		if !ok {
+			return nil, fmt.Errorf("expected RSA key, got %T", k)
+		}
+		return rsaKey, nil
+	}
+}
+
+func envInt64(name string) (v int64, ok bool, _ error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return 0, false, nil
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, false, fmt.Errorf("%s must be an integer", name)
+	}
+	return n, true, nil
+}
+
+func parseCSVSet(csv string) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, part := range strings.Split(csv, ",") {
+		s := strings.ToLower(strings.TrimSpace(part))
+		if s == "" {
+			continue
+		}
+		out[s] = struct{}{}
+	}
+	return out
+}
+
+type githubOpenPRRequest struct {
+	Repo string `json:"repo"` // owner/repo
+
+	Base string `json:"base,omitempty"` // default main
+
+	Title string `json:"title"`
+	Body  string `json:"body,omitempty"`
+
+	// Patch is a unified diff. It is applied onto Base and committed.
+	Patch string `json:"patch"`
+
+	CommitMessage string `json:"commitMessage,omitempty"`
+	Branch        string `json:"branch,omitempty"` // must start with prefix if provided
+	Draft         bool   `json:"draft,omitempty"`
+}
+
+type githubOpenPRResponse struct {
+	Repo   string `json:"repo"`
+	Branch string `json:"branch"`
+	Base   string `json:"base"`
+	Number int    `json:"number"`
+	URL    string `json:"url"`
+
+	PatchSHA256 string `json:"patchSha256"`
+}
+
+func (s *server) handleGitHubOpenPR(w http.ResponseWriter, r *http.Request) {
+	if s.gh == nil {
+		writeJSON(w, http.StatusNotImplemented, map[string]any{
+			"error": "github_disabled",
+			"hint":  "Configure GITHUB_APP_* env vars and GITHUB_REPO_ALLOWLIST to enable broker-only PR creation.",
+		})
+		return
+	}
+
+	// Cap body size: patches can be large, but we don't want unbounded memory usage.
+	r.Body = http.MaxBytesReader(w, r.Body, 5<<20) // 5 MiB
+
+	var req githubOpenPRRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "bad_json"})
+		return
+	}
+
+	resp, err := s.gh.openPRFromPatch(r.Context(), r, req)
+	if err != nil {
+		var herr httpError
+		if errors.As(err, &herr) {
+			writeJSON(w, herr.Status, map[string]any{"error": herr.Code})
+			return
+		}
+		log.Printf("github open-pr failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal_error"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+type httpError struct {
+	Status int
+	Code   string
+	Err    error
+}
+
+func (e httpError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("%s: %v", e.Code, e.Err)
+	}
+	return e.Code
+}
+
+func (e httpError) Unwrap() error { return e.Err }
+
+func invalidGitRef(ref string) bool {
+	if strings.TrimSpace(ref) != ref {
+		return true
+	}
+	if strings.ContainsAny(ref, " \t\r\n") {
+		return true
+	}
+	if strings.HasPrefix(ref, "/") || strings.HasSuffix(ref, "/") {
+		return true
+	}
+	if strings.Contains(ref, "..") {
+		return true
+	}
+	if strings.Contains(ref, "@{") {
+		return true
+	}
+	// Disallow obvious ref/path injection characters.
+	if strings.ContainsAny(ref, "~^:?*[]\\") {
+		return true
+	}
+	return false
+}
+
+func (g *githubService) openPRFromPatch(ctx context.Context, r *http.Request, req githubOpenPRRequest) (*githubOpenPRResponse, error) {
+	repo := strings.ToLower(strings.TrimSpace(req.Repo))
+	if repo == "" || !strings.Contains(repo, "/") {
+		return nil, httpError{Status: http.StatusBadRequest, Code: "repo_required"}
+	}
+	if _, ok := g.repoAllowlist[repo]; !ok {
+		return nil, httpError{Status: http.StatusForbidden, Code: "repo_not_allowed"}
+	}
+
+	base := strings.TrimSpace(req.Base)
+	if base == "" {
+		base = g.defaultBase
+	}
+	if _, ok := g.allowedBases[strings.ToLower(base)]; !ok {
+		return nil, httpError{Status: http.StatusBadRequest, Code: "base_not_allowed"}
+	}
+
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		return nil, httpError{Status: http.StatusBadRequest, Code: "title_required"}
+	}
+
+	patch := req.Patch
+	if strings.TrimSpace(patch) == "" {
+		return nil, httpError{Status: http.StatusBadRequest, Code: "patch_required"}
+	}
+
+	branch := strings.TrimSpace(req.Branch)
+	if branch == "" {
+		branch = g.branchPrefix + randomSlug()
+	}
+	if !strings.HasPrefix(branch, g.branchPrefix) {
+		return nil, httpError{Status: http.StatusBadRequest, Code: "branch_prefix_required"}
+	}
+	if invalidGitRef(branch) {
+		return nil, httpError{Status: http.StatusBadRequest, Code: "invalid_branch"}
+	}
+
+	commitMsg := strings.TrimSpace(req.CommitMessage)
+	if commitMsg == "" {
+		commitMsg = "agent: " + title
+	}
+
+	patchHash := sha256.Sum256([]byte(patch))
+	patchHashHex := hex.EncodeToString(patchHash[:])
+
+	token, err := g.getInstallationToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	owner, name, err := splitRepo(repo)
+	if err != nil {
+		return nil, httpError{Status: http.StatusBadRequest, Code: "invalid_repo", Err: err}
+	}
+
+	tmpRoot := getenv("BROKER_TMP_DIR", "")
+	tmpDir, err := os.MkdirTemp(tmpRoot, "wsp-broker-gh-*")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	repoDir := filepath.Join(tmpDir, "repo")
+	patchPath := filepath.Join(tmpDir, "patch.diff")
+	if err := os.WriteFile(patchPath, []byte(patch), 0600); err != nil {
+		return nil, err
+	}
+
+	askpassPath := filepath.Join(tmpDir, "askpass.sh")
+	if err := writeAskpass(askpassPath); err != nil {
+		return nil, err
+	}
+
+	baseURL := fmt.Sprintf("%s/%s/%s.git", g.gitBase, owner, name)
+	env := brokerGitEnv(tmpDir, askpassPath, token)
+
+	// Clone base branch.
+	if err := runGit(ctx, tmpDir, env, "clone", "--depth", "1", "--branch", base, baseURL, repoDir); err != nil {
+		return nil, err
+	}
+
+	// Configure identity.
+	if err := runGit(ctx, repoDir, env, "config", "user.name", g.authorName); err != nil {
+		return nil, err
+	}
+	if err := runGit(ctx, repoDir, env, "config", "user.email", g.authorEmail); err != nil {
+		return nil, err
+	}
+	_ = runGit(ctx, repoDir, env, "config", "commit.gpgsign", "false")
+
+	// Create branch, apply patch, commit.
+	if err := runGit(ctx, repoDir, env, "checkout", "-b", branch); err != nil {
+		return nil, err
+	}
+	if err := runGit(ctx, repoDir, env, "apply", "--index", "--binary", "--whitespace=nowarn", patchPath); err != nil {
+		return nil, httpError{Status: http.StatusBadRequest, Code: "patch_apply_failed", Err: err}
+	}
+	if err := runGit(ctx, repoDir, env, "commit", "-m", commitMsg, "--no-gpg-sign"); err != nil {
+		return nil, httpError{Status: http.StatusBadRequest, Code: "commit_failed", Err: err}
+	}
+
+	if err := runGit(ctx, repoDir, env, "push", "origin", branch); err != nil {
+		return nil, err
+	}
+
+	prNum, prURL, err := g.createPR(ctx, token, owner, name, title, req.Body, branch, base, req.Draft)
+	if err != nil {
+		return nil, err
+	}
+
+	reqID := middleware.GetReqID(ctx)
+	auditEvent("github.open_pr", map[string]any{
+		"request_id":     reqID,
+		"remote_addr":    r.RemoteAddr,
+		"repo":           repo,
+		"base":           base,
+		"branch":         branch,
+		"pr_number":      prNum,
+		"pr_url":         prURL,
+		"patch_sha256":   patchHashHex,
+		"commit_message": commitMsg,
+	})
+
+	return &githubOpenPRResponse{
+		Repo:        repo,
+		Branch:      branch,
+		Base:        base,
+		Number:      prNum,
+		URL:         prURL,
+		PatchSHA256: patchHashHex,
+	}, nil
+}
+
+func brokerGitEnv(tmpDir, askpassPath, token string) []string {
+	home := filepath.Join(tmpDir, "home")
+	_ = os.MkdirAll(home, 0700)
+	return []string{
+		"HOME=" + home,
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_ASKPASS=" + askpassPath,
+		"WORKSPACES_GIT_PASSWORD=" + token,
+	}
+}
+
+func writeAskpass(path string) error {
+	// Token is passed via env to avoid writing it to disk or process args.
+	// Git may prompt for username/password; handle both.
+	script := `#!/bin/sh
+case "$1" in
+*Username*) echo "x-access-token" ;;
+*) echo "$WORKSPACES_GIT_PASSWORD" ;;
+esac
+`
+	return os.WriteFile(path, []byte(script), 0700)
+}
+
+func runGit(ctx context.Context, dir string, extraEnv []string, args ...string) error {
+	cmd := execCommand(ctx, "git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), extraEnv...)
+
+	// Capture output for errors; never print tokens (we keep tokens out of args).
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if len(msg) > 8<<10 {
+			msg = msg[:8<<10] + "...(truncated)"
+		}
+		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, msg)
+	}
+	return nil
+}
+
+func splitRepo(repo string) (owner string, name string, _ error) {
+	parts := strings.Split(repo, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("expected owner/repo, got %q", repo)
+	}
+	return parts[0], parts[1], nil
+}
+
+func randomSlug() string {
+	// time prefix + random suffix to reduce collisions.
+	now := time.Now().UTC().Format("20060102-150405")
+	var b [6]byte
+	_, _ = rand.Read(b[:])
+	return fmt.Sprintf("%s-%x", now, b[:])
+}
+
+func (g *githubService) getInstallationToken(ctx context.Context) (string, error) {
+	g.mu.Lock()
+	if g.cachedToken != "" && time.Now().Before(g.cachedExpiry.Add(-2*time.Minute)) {
+		t := g.cachedToken
+		g.mu.Unlock()
+		return t, nil
+	}
+	g.mu.Unlock()
+
+	jwtToken, err := g.appJWT()
+	if err != nil {
+		return "", err
+	}
+
+	u := fmt.Sprintf("%s/app/installations/%d/access_tokens", g.apiBase, g.installationID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(nil))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", "Bearer "+jwtToken)
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := g.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("github token endpoint: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var parsed struct {
+		Token     string `json:"token"`
+		ExpiresAt string `json:"expires_at"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "", err
+	}
+	if parsed.Token == "" || parsed.ExpiresAt == "" {
+		return "", errors.New("github token endpoint returned empty token/expiry")
+	}
+
+	exp, err := time.Parse(time.RFC3339, parsed.ExpiresAt)
+	if err != nil {
+		return "", err
+	}
+
+	g.mu.Lock()
+	g.cachedToken = parsed.Token
+	g.cachedExpiry = exp
+	g.mu.Unlock()
+
+	return parsed.Token, nil
+}
+
+func (g *githubService) appJWT() (string, error) {
+	now := time.Now()
+	claims := jwt.RegisteredClaims{
+		Issuer:    fmt.Sprintf("%d", g.appID),
+		IssuedAt:  jwt.NewNumericDate(now.Add(-30 * time.Second)),
+		ExpiresAt: jwt.NewNumericDate(now.Add(9 * time.Minute)),
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	return tok.SignedString(g.privateKey)
+}
+
+func (g *githubService) createPR(ctx context.Context, token, owner, repo, title, body, head, base string, draft bool) (int, string, error) {
+	u := fmt.Sprintf("%s/repos/%s/%s/pulls", g.apiBase, owner, repo)
+	payload := map[string]any{
+		"title": title,
+		"head":  head,
+		"base":  base,
+		"draft": draft,
+	}
+	if strings.TrimSpace(body) != "" {
+		payload["body"] = body
+	}
+	b, _ := json.Marshal(payload)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(b))
+	if err != nil {
+		return 0, "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := g.httpClient.Do(req)
+	if err != nil {
+		return 0, "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return 0, "", fmt.Errorf("github create pr: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+
+	var parsed struct {
+		Number  int    `json:"number"`
+		HTMLURL string `json:"html_url"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return 0, "", err
+	}
+	if parsed.Number == 0 || parsed.HTMLURL == "" {
+		return 0, "", errors.New("github create pr returned empty number/url")
+	}
+	return parsed.Number, parsed.HTMLURL, nil
+}
+
+func auditEvent(eventType string, fields map[string]any) {
+	evt := map[string]any{
+		"type": eventType,
+		"ts":   time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	for k, v := range fields {
+		evt[k] = v
+	}
+	b, err := json.Marshal(evt)
+	if err != nil {
+		log.Printf("AUDIT marshal failed: %v", err)
+		return
+	}
+	log.Printf("AUDIT %s", b)
+}

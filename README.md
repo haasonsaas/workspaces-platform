@@ -13,8 +13,14 @@ Repo layout:
 - `api/v1alpha1`: CRD Go types (Desktop, AgentJob, NetworkGrant).
 - `k8s/`: CRDs + example manifests (Cilium policies, operator deploy).
 
-This repo is an MVP skeleton. It compiles, but you still need to wire:
-- real desktop/agent images (see TODOs in manifests)
-- GitHub App credentials in the capability broker
-- Vault + audit ingestion (planned, not implemented here yet)
+Docs:
+- `ARCHITECTURE.md`
+- `docs/mvp.md`
+- `docs/access.md`
+- `docs/security.md`
+- `docs/audit.md`
 
+This repo is an MVP that compiles and deploys manifests, but you still need to wire:
+- image build/publish for operator/broker/desktop/agent images
+- GitHub App Secret + allowlists for broker PR creation
+- Vault integration + tamper-evident audit shipping to MinIO
