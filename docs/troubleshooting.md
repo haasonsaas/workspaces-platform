@@ -45,3 +45,15 @@ Your cluster doesn't support the CEL admission APIs.
 Fix:
 - Use `kubectl apply -k k8s` (base)
 - Apply quotas only: `kubectl apply -f k8s/optional/hardened/agents-quotas.yaml` and `kubectl apply -f k8s/optional/hardened/desktops-quotas.yaml`
+
+## MinIO pods fail (missing Secret)
+
+If you deploy `k8s/optional/storage/minio.yaml` (directly or via overlays) without creating the required Secret:
+- Pods will fail with `CreateContainerConfigError` or env var SecretKeyRef errors.
+
+Fix:
+```bash
+kubectl apply -f k8s/examples/minio-root.yaml
+```
+
+Then rotate the placeholder credentials.

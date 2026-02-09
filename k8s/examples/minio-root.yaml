@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-root
+  namespace: workspaces-system
+type: Opaque
+stringData:
+  # Change these (and rotate if leaked).
+  root_user: "workspaces"
+  root_password: "change-me"
+

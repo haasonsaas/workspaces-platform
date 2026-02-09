@@ -55,6 +55,7 @@ Adds common internal mirrors/caches:
 - Athens (Go)
 - Docker Registry pull-through cache
 - Maven cache
+- MinIO (S3-compatible object store; required for some artifact/audit flows)
 
 ```bash
 kubectl apply -k k8s-overlays/proxies

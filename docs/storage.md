@@ -23,6 +23,23 @@ deletionPolicy: Delete
 
 This repo includes an example manifest at `k8s/optional/storage/longhorn-volumesnapshotclass.yaml`.
 
+## Object Store (MinIO)
+
+This platform uses an S3-compatible object store for:
+- artifact uploads (agent logs/results)
+- cache backends (optional)
+- audit bundle shipping (optional)
+
+On-prem default: MinIO.
+
+Optional example manifests:
+- `k8s/optional/storage/minio.yaml` (single-node MinIO Deployment + PVC + Service)
+- `k8s/examples/minio-root.yaml` (root credentials Secret; required by the Deployment)
+
+After deploying MinIO, wire the broker and auditship using:
+- `k8s/examples/capability-broker-artifacts.yaml`
+- `k8s/examples/auditship-s3.yaml`
+
 ## HomeTemplate (Warm Start + Reset)
 
 `HomeTemplate` creates:
