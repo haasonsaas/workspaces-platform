@@ -11,6 +11,7 @@ MVP locks:
 Repo layout:
 - `cmd/workspaces-operator`: reconciles CRDs into Kubernetes workloads.
 - `cmd/egress-proxy`: HTTP CONNECT proxy that enforces `NetworkGrant` allowlists (proxy-first egress).
+- `cmd/wsctl`: minimal CLI (create desktops/jobs, request netgrants, `wsctl doctor` preflight checks).
 - `api/v1alpha1`: CRD Go types (Desktop, AgentJob, NetworkGrant).
 - `k8s/`: CRDs + example manifests (Cilium policies, operator deploy).
 - `k8s-overlays/`: Kustomize overlays that bundle optional features (audit, proxies, admission guardrails).

@@ -9,3 +9,18 @@ resources:
   - ../../k8s/optional/storage
   - ../../k8s/optional/proxies
   - ../../k8s/optional/hardened
+
+patches:
+  # Namespace-level Pod Security Standards labels (optional hardening).
+  - path: podsecurity-agents.yaml
+    target:
+      kind: Namespace
+      name: agents
+  - path: podsecurity-desktops.yaml
+    target:
+      kind: Namespace
+      name: desktops
+  - path: podsecurity-workspaces-system.yaml
+    target:
+      kind: Namespace
+      name: workspaces-system

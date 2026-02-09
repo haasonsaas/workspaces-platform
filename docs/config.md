@@ -47,6 +47,7 @@ GitHub policy (PR writes):
 - `GITHUB_GIT_AUTHOR_NAME` (default `workspaces-broker`)
 - `GITHUB_GIT_AUTHOR_EMAIL` (default `workspaces-broker@localhost`)
 - `GITHUB_MAX_FILES_CHANGED` (default `100`)
+- `GITHUB_MAX_PATCH_BYTES` (default `2097152` = 2MiB; `0` disables)
 - `GITHUB_ALLOW_BINARY_PATCHES` (default `false`)
 - `GITHUB_SENSITIVE_PATH_PREFIX_DENYLIST` (default `.github/workflows/,infra/,terraform/,deploy/`)
 - `GITHUB_SENSITIVE_PATH_ALLOWLIST_REPOS` (optional): repos allowed to touch sensitive paths.

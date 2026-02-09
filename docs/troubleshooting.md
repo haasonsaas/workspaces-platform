@@ -1,5 +1,20 @@
 # Troubleshooting
 
+## `wsctl doctor` fails
+
+Use `wsctl doctor` to get a fast "what am I missing" report:
+```bash
+wsctl doctor
+wsctl doctor --mode preflight
+wsctl doctor --mode installed
+```
+
+Common fixes:
+- Install Cilium (required; this repo uses `CiliumNetworkPolicy` and FQDN egress).
+- Install the CSI snapshot CRDs + snapshot-controller (required for `HomeTemplate` snapshots).
+- Install Kata Containers and a `RuntimeClass` named `kata` (example: `k8s/examples/runtimeclass-kata.yaml`, or set `DEFAULT_AGENT_RUNTIMECLASS`).
+- Install Longhorn and apply `k8s/optional/storage/longhorn-volumesnapshotclass.yaml`.
+
 ## NetworkGrant rejected (SpecValid=false)
 
 Common causes (and fixes):

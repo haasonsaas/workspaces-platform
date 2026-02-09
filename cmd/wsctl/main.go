@@ -17,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,6 +34,8 @@ func main() {
 	}
 
 	switch os.Args[1] {
+	case "doctor":
+		cmdDoctor(os.Args[2:])
 	case "desktop":
 		cmdDesktop(os.Args[2:])
 	case "agent":
@@ -53,6 +56,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `wsctl: minimal CLI for workspaces-platform
 
 Usage:
+  wsctl doctor [--mode preflight|installed|all] ...
   wsctl desktop <create|get|list|suspend|resume|delete> ...
   wsctl agent   <create|run-pr|get|list|delete> ...
   wsctl netgrant <request|approve> ...
@@ -534,14 +538,21 @@ func cmdGitHub(args []string) {
 }
 
 func newK8sClient() (client.Client, error) {
-	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
-	overrides := &clientcmd.ConfigOverrides{}
-	cfg := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, overrides)
-	restCfg, err := cfg.ClientConfig()
+	restCfg, err := newRestConfig()
 	if err != nil {
 		return nil, err
 	}
+	return newK8sClientWithConfig(restCfg)
+}
 
+func newRestConfig() (*rest.Config, error) {
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	overrides := &clientcmd.ConfigOverrides{}
+	cfg := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, overrides)
+	return cfg.ClientConfig()
+}
+
+func newK8sClientWithConfig(restCfg *rest.Config) (client.Client, error) {
 	scheme := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(scheme)
 	_ = workspacesv1alpha1.AddToScheme(scheme)

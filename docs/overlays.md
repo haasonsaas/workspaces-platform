@@ -36,6 +36,7 @@ kubectl apply -k k8s
 Adds:
 - quotas for `agents` and `desktops`
 - optional CEL admission guardrails (`ValidatingAdmissionPolicy`)
+- namespace-level Pod Security Standards labels (`agents=restricted`, `desktops=baseline`, `workspaces-system=baseline`)
 
 ```bash
 kubectl apply -k k8s-overlays/hardened

@@ -13,6 +13,10 @@ spec:
       labels:
         app: github-webhook
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: github-webhook
           image: ghcr.io/haasonsaas/workspaces-github-webhook:latest
@@ -61,6 +65,17 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           livenessProbe:
             httpGet:
               path: /healthz
@@ -69,3 +84,6 @@ spec:
             httpGet:
               path: /readyz
               port: 8080
+      volumes:
+        - name: tmp
+          emptyDir: {}

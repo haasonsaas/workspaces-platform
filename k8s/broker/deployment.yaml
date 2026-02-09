@@ -14,12 +14,18 @@ spec:
         app: capability-broker
     spec:
       serviceAccountName: capability-broker
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: broker
           image: ghcr.io/haasonsaas/workspaces-capability-broker:latest
           env:
             - name: LISTEN_ADDR
               value: ":8080"
+            # Broker runs with a read-only root filesystem; keep $HOME writable.
+            - name: HOME
+              value: "/tmp"
             # Required: per-job auth signing secret (HS256). Used for agent-facing endpoints
             # (/v1/network-grants, /v1/github/open-pr).
             - name: BROKER_JOB_JWT_SECRET
@@ -129,6 +135,12 @@ spec:
                 configMapKeyRef:
                   name: capability-broker-config
                   key: github_max_files_changed
+                  optional: true
+            - name: GITHUB_MAX_PATCH_BYTES
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: github_max_patch_bytes
                   optional: true
             - name: GITHUB_ALLOW_BINARY_PATCHES
               valueFrom:
@@ -281,10 +293,20 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop:
+                - ALL
           volumeMounts:
             - name: github-app
               mountPath: /etc/github-app
               readOnly: true
+            - name: tmp
+              mountPath: /tmp
           livenessProbe:
             httpGet:
               path: /healthz
@@ -298,6 +320,8 @@ spec:
           secret:
             secretName: capability-broker-github-app
             optional: true
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

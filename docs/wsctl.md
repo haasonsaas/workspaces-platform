@@ -7,6 +7,19 @@ Build:
 go build ./cmd/wsctl
 ```
 
+## Doctor
+
+Preflight and installation checks (exits non-zero on required failures):
+```bash
+wsctl doctor
+
+# Only cluster capabilities (Cilium, snapshot CRDs, Kata RuntimeClass, Longhorn CSIDriver).
+wsctl doctor --mode preflight
+
+# Only checks that `kubectl apply -k k8s` has been applied successfully.
+wsctl doctor --mode installed
+```
+
 ## Desktop
 
 Create:

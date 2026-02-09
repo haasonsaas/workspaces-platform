@@ -49,6 +49,7 @@ type githubService struct {
 
 	// Patch safety limits.
 	maxFilesChanged    int
+	maxPatchBytes      int
 	allowBinaryPatches bool
 
 	// Sensitive paths are denied by default unless the repo is explicitly allowlisted.
@@ -121,6 +122,15 @@ func newGitHubServiceFromEnv(audit auditpkg.Emitter) (*githubService, error) {
 		maxFilesChanged = n
 	}
 
+	maxPatchBytes := 2 << 20 // 2 MiB
+	if raw := strings.TrimSpace(getenv("GITHUB_MAX_PATCH_BYTES", "2097152")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			return nil, errors.New("GITHUB_MAX_PATCH_BYTES must be a non-negative integer")
+		}
+		maxPatchBytes = n
+	}
+
 	sensitiveDeny := parseCSVList(getenv("GITHUB_SENSITIVE_PATH_PREFIX_DENYLIST", ".github/workflows/,infra/,terraform/,deploy/"))
 	sensitiveAllowRepos := parseCSVSet(os.Getenv("GITHUB_SENSITIVE_PATH_ALLOWLIST_REPOS"))
 
@@ -145,6 +155,7 @@ func newGitHubServiceFromEnv(audit auditpkg.Emitter) (*githubService, error) {
 		authorName:                  authorName,
 		authorEmail:                 authorEmail,
 		maxFilesChanged:             maxFilesChanged,
+		maxPatchBytes:               maxPatchBytes,
 		allowBinaryPatches:          allowBinary,
 		sensitivePathPrefixDenylist: sensitiveDeny,
 		sensitivePathAllowlistRepos: sensitiveAllowRepos,
@@ -367,6 +378,9 @@ func (g *githubService) openPRFromPatch(ctx context.Context, r *http.Request, re
 	patch := req.Patch
 	if strings.TrimSpace(patch) == "" {
 		return nil, httpError{Status: http.StatusBadRequest, Code: "patch_required"}
+	}
+	if g.maxPatchBytes > 0 && len(patch) > g.maxPatchBytes {
+		return nil, httpError{Status: http.StatusBadRequest, Code: "patch_too_large"}
 	}
 
 	branch := strings.TrimSpace(req.Branch)

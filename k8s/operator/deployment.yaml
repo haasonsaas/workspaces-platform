@@ -14,6 +14,9 @@ spec:
         app: workspaces-operator
     spec:
       serviceAccountName: workspaces-operator
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: operator
           image: ghcr.io/haasonsaas/workspaces-operator:latest
@@ -50,3 +53,17 @@ spec:
             httpGet:
               path: /readyz
               port: 8081
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
