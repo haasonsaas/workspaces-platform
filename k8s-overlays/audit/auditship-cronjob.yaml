@@ -1,0 +1,40 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: auditship
+  namespace: workspaces-system
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: auditship
+              # TODO: publish/build this image.
+              image: ghcr.io/workspaces-platform/auditship:latest
+              args:
+                - "--dir=/var/lib/workspaces/audit"
+                - "--env-prefix=AUDIT_"
+              envFrom:
+                - configMapRef:
+                    name: auditship-config
+                - secretRef:
+                    # Create this Secret with keys:
+                    # - AUDIT_S3_ACCESS_KEY_ID
+                    # - AUDIT_S3_SECRET_ACCESS_KEY
+                    name: auditship-s3
+              volumeMounts:
+                - name: audit
+                  mountPath: /var/lib/workspaces/audit
+                  readOnly: true
+          volumes:
+            - name: audit
+              persistentVolumeClaim:
+                claimName: workspaces-audit
+

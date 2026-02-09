@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: capability-broker
+  namespace: workspaces-system
+spec:
+  template:
+    spec:
+      volumes:
+        - name: audit
+          persistentVolumeClaim:
+            claimName: workspaces-audit
+      containers:
+        - name: broker
+          env:
+            - name: AUDIT_SINK
+              value: file
+            - name: AUDIT_STREAM
+              value: broker
+            - name: AUDIT_DIR
+              value: /var/lib/workspaces/audit
+            - name: AUDIT_FSYNC_ON_CHECKPOINT
+              value: "true"
+            - name: AUDIT_HMAC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: capability-broker-secrets
+                  key: audit_hmac_key
+                  optional: true
+          volumeMounts:
+            - name: audit
+              mountPath: /var/lib/workspaces/audit
+

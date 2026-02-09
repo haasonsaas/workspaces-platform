@@ -75,6 +75,28 @@ go build ./cmd/auditship
 ./auditship --dir "$AUDIT_DIR"
 ```
 
+## Kubernetes Pattern (Recommended)
+
+For a realistic on-prem setup, run the broker with `AUDIT_SINK=file` writing to a PVC, then ship bundles to MinIO via a CronJob.
+
+This repo includes:
+- `k8s-overlays/audit`: patches `capability-broker` to enable the file sink and mounts a `workspaces-audit` PVC
+- `k8s-overlays/audit`: an `auditship` CronJob that uploads audit files to MinIO/S3
+- `k8s/examples/auditship-s3.yaml`: example Secret for `auditship` credentials
+
+Workflow:
+```bash
+# Base install
+kubectl apply -k k8s
+
+# Create secrets (edit placeholders)
+kubectl apply -f k8s/examples/capability-broker-secrets.yaml
+kubectl apply -f k8s/examples/auditship-s3.yaml
+
+# Apply the audit overlay (PVC + broker patch + CronJob)
+kubectl apply -k k8s-overlays/audit
+```
+
 ## Next Implementation Step
 
 1. Introduce an `audit-sink` that:

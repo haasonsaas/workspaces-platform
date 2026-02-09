@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auditship-config
+  namespace: workspaces-system
+data:
+  # Configure this for your MinIO/S3 endpoint + bucket.
+  AUDIT_S3_ENDPOINT: "http://minio.workspaces-system.svc.cluster.local:9000"
+  AUDIT_S3_BUCKET: "workspaces-audit"
+  AUDIT_S3_REGION: "us-east-1"
+  AUDIT_S3_PREFIX: "workspaces"
+  AUDIT_S3_FORCE_PATH_STYLE: "true"
+
