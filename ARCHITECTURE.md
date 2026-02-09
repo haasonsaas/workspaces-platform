@@ -252,7 +252,7 @@ Target properties:
 - signatures (Vault transit or similar)
 - 30 days hot / 90 days cold (baseline)
 
-MVP implementation logs audit events as JSON to broker logs; the next step is shipping to MinIO with hash chaining + signing.
+MVP implementation logs audit events as JSON to broker logs; the repo also supports a tamper-evident file sink (hash chain + optional HMAC-signed checkpoints). The next step is shipping signed bundles to MinIO with WORM/ObjectLock in production.
 
 ## Roadmap (Concrete Next Steps)
 
@@ -260,11 +260,11 @@ MVP implementation logs audit events as JSON to broker logs; the next step is sh
    - broker issues short-lived, scoped credentials
    - agents never receive long-lived secrets
 2. Audit pipeline:
-   - hash chain + signature
+   - ship hash-chained, signed bundles to MinIO
    - MinIO Object Lock/WORM in prod
 3. Desktop VM class (KubeVirt) for systemd + stronger isolation users
 4. Autosuspend + quotas:
-   - desktop idle detection, suspend/stop
+   - desktop idle detection + suspend/resume (implemented: `ws-proxy` heartbeat + operator scales replicas)
    - org/user concurrency caps for agent jobs
 5. GitHub-native triggers:
    - PR comment `/agent run` (implemented)
