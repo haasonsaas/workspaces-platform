@@ -206,6 +206,24 @@ func (s *server) handleCreateNetworkGrant(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "agentjob_not_found"})
 		return
 	}
+
+	// Defense-in-depth: cap the number of grants per job to prevent policy sprawl
+	// and object spam. Admin callers can bypass this cap.
+	if !s.isAdmin(r) && s.netPolicy.maxGrantsPerJob > 0 {
+		n, err := s.countActiveOrPendingNetworkGrantsForJob(ctx, strings.TrimSpace(req.Namespace), strings.TrimSpace(req.AgentJob))
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_failed"})
+			return
+		}
+		if n >= s.netPolicy.maxGrantsPerJob {
+			writeJSON(w, http.StatusTooManyRequests, map[string]any{
+				"error":   "networkgrant_limit_exceeded",
+				"current": n,
+				"max":     s.netPolicy.maxGrantsPerJob,
+			})
+			return
+		}
+	}
 	if strings.TrimSpace(req.Purpose) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "purpose_required"})
 		return
@@ -946,6 +964,35 @@ func validateNetworkGrantSpecShape(egress []workspacesv1alpha1.NetworkGrantEgres
 	}
 
 	return nil
+}
+
+func (s *server) countActiveOrPendingNetworkGrantsForJob(ctx context.Context, namespace, jobName string) (int, error) {
+	namespace = strings.TrimSpace(namespace)
+	jobName = strings.TrimSpace(jobName)
+	if namespace == "" || jobName == "" {
+		return 0, fmt.Errorf("namespace and jobName are required")
+	}
+
+	var list workspacesv1alpha1.NetworkGrantList
+	if err := s.k8s.List(ctx, &list, client.InNamespace(namespace)); err != nil {
+		return 0, err
+	}
+
+	now := time.Now()
+	n := 0
+	for i := range list.Items {
+		ng := &list.Items[i]
+		if ng.Spec.AgentJobRef == nil || strings.TrimSpace(ng.Spec.AgentJobRef.Name) != jobName {
+			continue
+		}
+		if ng.Spec.Approved {
+			if !ng.Status.ExpiresAt.IsZero() && now.After(ng.Status.ExpiresAt.Time) {
+				continue
+			}
+		}
+		n++
+	}
+	return n, nil
 }
 
 func (s *server) isAdmin(r *http.Request) bool {

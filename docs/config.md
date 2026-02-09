@@ -30,6 +30,7 @@ NetworkGrant policy guardrails (proxy-first by default):
 - `BROKER_NETWORK_PUBLIC_EGRESS_ALLOWLIST` (default empty): CSV of exact public hostnames allowed for non-admin egress requests/approvals (e.g. `github.com,api.github.com`).
 - `BROKER_NETWORK_PUBLIC_DNS_ALLOWLIST` (default empty): CSV of exact public DNS names allowed in `NetworkGrant.spec.dnsAllow` for non-admin approvals.
 - `BROKER_NETWORK_INTERNAL_SUFFIX_ALLOWLIST` (default `svc.cluster.local,cluster.local`): CSV of suffixes treated as internal destinations (exempt from public egress restrictions).
+- `BROKER_NETWORK_MAX_GRANTS_PER_JOB` (default `20`): max number of NetworkGrants allowed per AgentJob (counts approved + pending; expired approved grants do not count). `0` disables.
 
 GitHub App (broker-only PR writes and PR-scoped agent runs):
 - `GITHUB_APP_ID` (required to enable GitHub features)

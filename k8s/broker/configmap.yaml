@@ -9,6 +9,7 @@ data:
   broker_network_public_egress_allowlist: "" # CSV exact public hostnames
   broker_network_public_dns_allowlist: "" # CSV exact DNS names allowed in dnsAllow
   broker_network_internal_suffix_allowlist: "svc.cluster.local,cluster.local"
+  broker_network_max_grants_per_job: "20" # 0 disables
 
   # Comma-separated allowlist of owner/repo entries. Empty => GitHub integration disabled (secure default).
   github_repo_allowlist: ""

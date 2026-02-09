@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	workspacesv1alpha1 "workspaces-platform/api/v1alpha1"
@@ -33,6 +34,11 @@ type networkGrantPolicy struct {
 	// when publicEgressMode is "deny". This is intentionally separate from the
 	// egress allowlist to avoid DNS-only unlock drift.
 	publicDNSAllowlist map[string]struct{}
+
+	// maxGrantsPerJob caps how many NetworkGrant objects may exist for a single
+	// AgentJob (defense-in-depth against policy sprawl and object spam).
+	// 0 disables the cap.
+	maxGrantsPerJob int
 }
 
 func newNetworkGrantPolicyFromEnv() (networkGrantPolicy, error) {
@@ -48,11 +54,21 @@ func newNetworkGrantPolicyFromEnv() (networkGrantPolicy, error) {
 		internalSuffixes = []string{"svc.cluster.local", "cluster.local"}
 	}
 
+	maxGrantsPerJob := 20
+	if raw := strings.TrimSpace(getenv("BROKER_NETWORK_MAX_GRANTS_PER_JOB", "20")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			return networkGrantPolicy{}, fmt.Errorf("BROKER_NETWORK_MAX_GRANTS_PER_JOB=%q is invalid (want non-negative int)", raw)
+		}
+		maxGrantsPerJob = n
+	}
+
 	return networkGrantPolicy{
 		publicEgressMode:        mode,
 		internalSuffixAllowlist: internalSuffixes,
 		publicEgressAllowlist:   normalizeSet(parseCSVSet(getenv("BROKER_NETWORK_PUBLIC_EGRESS_ALLOWLIST", ""))),
 		publicDNSAllowlist:      normalizeSet(parseCSVSet(getenv("BROKER_NETWORK_PUBLIC_DNS_ALLOWLIST", ""))),
+		maxGrantsPerJob:         maxGrantsPerJob,
 	}, nil
 }
 
