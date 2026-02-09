@@ -57,6 +57,24 @@ go build ./cmd/auditctl
 ./auditctl verify --events /path/to/events-broker-YYYY-MM-DD.jsonl --checkpoints /path/to/checkpoints-broker-YYYY-MM-DD.jsonl
 ```
 
+## Shipping To MinIO/S3 (Optional)
+
+This repo also includes `cmd/auditship` to upload file-sink outputs to an S3-compatible object store (MinIO).
+
+Example:
+```bash
+export AUDIT_DIR=/var/log/workspaces/audit
+export AUDIT_S3_ENDPOINT=http://minio.workspaces-system.svc.cluster.local:9000
+export AUDIT_S3_BUCKET=workspaces-audit
+export AUDIT_S3_REGION=us-east-1
+export AUDIT_S3_ACCESS_KEY_ID=...
+export AUDIT_S3_SECRET_ACCESS_KEY=...
+export AUDIT_S3_PREFIX=workspaces
+
+go build ./cmd/auditship
+./auditship --dir "$AUDIT_DIR"
+```
+
 ## Next Implementation Step
 
 1. Introduce an `audit-sink` that:

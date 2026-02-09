@@ -43,25 +43,46 @@ type S3Config struct {
 }
 
 func NewS3FromEnv(ctx context.Context) (*S3Store, error) {
-	endpoint := strings.TrimSpace(os.Getenv("ARTIFACT_S3_ENDPOINT"))
-	bucket := strings.TrimSpace(os.Getenv("ARTIFACT_S3_BUCKET"))
+	return NewS3FromEnvWithPrefix(ctx, "ARTIFACT_")
+}
+
+// NewS3FromEnvWithPrefix reads S3 config from environment variables using a prefix.
+//
+// Expected variables (prefix defaults shown for "ARTIFACT_"):
+// - ARTIFACT_S3_ENDPOINT
+// - ARTIFACT_S3_BUCKET
+// - ARTIFACT_S3_REGION (default: us-east-1)
+// - ARTIFACT_S3_ACCESS_KEY_ID
+// - ARTIFACT_S3_SECRET_ACCESS_KEY
+// - ARTIFACT_S3_PREFIX (default: workspaces)
+// - ARTIFACT_S3_FORCE_PATH_STYLE (default: true)
+// - ARTIFACT_PUBLISH_LINKS (default: false)
+// - ARTIFACT_PRESIGN_TTL_SECONDS (default: 86400)
+func NewS3FromEnvWithPrefix(ctx context.Context, prefix string) (*S3Store, error) {
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" {
+		return nil, errors.New("empty env prefix")
+	}
+
+	endpoint := strings.TrimSpace(os.Getenv(prefix + "S3_ENDPOINT"))
+	bucket := strings.TrimSpace(os.Getenv(prefix + "S3_BUCKET"))
 	if endpoint == "" || bucket == "" {
-		return nil, errors.New("ARTIFACT_S3_ENDPOINT and ARTIFACT_S3_BUCKET are required")
+		return nil, fmt.Errorf("%sS3_ENDPOINT and %sS3_BUCKET are required", prefix, prefix)
 	}
-	region := strings.TrimSpace(getenv("ARTIFACT_S3_REGION", "us-east-1"))
+	region := strings.TrimSpace(getenv(prefix+"S3_REGION", "us-east-1"))
 
-	ak := strings.TrimSpace(os.Getenv("ARTIFACT_S3_ACCESS_KEY_ID"))
-	sk := strings.TrimSpace(os.Getenv("ARTIFACT_S3_SECRET_ACCESS_KEY"))
+	ak := strings.TrimSpace(os.Getenv(prefix + "S3_ACCESS_KEY_ID"))
+	sk := strings.TrimSpace(os.Getenv(prefix + "S3_SECRET_ACCESS_KEY"))
 	if ak == "" || sk == "" {
-		return nil, errors.New("ARTIFACT_S3_ACCESS_KEY_ID and ARTIFACT_S3_SECRET_ACCESS_KEY are required")
+		return nil, fmt.Errorf("%sS3_ACCESS_KEY_ID and %sS3_SECRET_ACCESS_KEY are required", prefix, prefix)
 	}
 
-	prefix := strings.Trim(strings.TrimSpace(getenv("ARTIFACT_S3_PREFIX", "workspaces")), "/")
-	forcePathStyle := strings.EqualFold(strings.TrimSpace(getenv("ARTIFACT_S3_FORCE_PATH_STYLE", "true")), "true")
+	prefixPath := strings.Trim(strings.TrimSpace(getenv(prefix+"S3_PREFIX", "workspaces")), "/")
+	forcePathStyle := strings.EqualFold(strings.TrimSpace(getenv(prefix+"S3_FORCE_PATH_STYLE", "true")), "true")
 
-	publishLinks := strings.EqualFold(strings.TrimSpace(getenv("ARTIFACT_PUBLISH_LINKS", "false")), "true")
+	publishLinks := strings.EqualFold(strings.TrimSpace(getenv(prefix+"PUBLISH_LINKS", "false")), "true")
 	presignTTL := 24 * time.Hour
-	if raw := strings.TrimSpace(getenv("ARTIFACT_PRESIGN_TTL_SECONDS", "86400")); raw != "" {
+	if raw := strings.TrimSpace(getenv(prefix+"PRESIGN_TTL_SECONDS", "86400")); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
 			presignTTL = time.Duration(n) * time.Second
 		}
@@ -73,7 +94,7 @@ func NewS3FromEnv(ctx context.Context) (*S3Store, error) {
 		AccessKeyID:     ak,
 		SecretAccessKey: sk,
 		Bucket:          bucket,
-		Prefix:          prefix,
+		Prefix:          prefixPath,
 		ForcePathStyle:  forcePathStyle,
 		PublishLinks:    publishLinks,
 		PresignTTL:      presignTTL,

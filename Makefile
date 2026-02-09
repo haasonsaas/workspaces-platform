@@ -11,3 +11,4 @@ build:
 	go build ./cmd/wsctl
 	go build ./cmd/agent-runner
 	go build ./cmd/auditctl
+	go build ./cmd/auditship
