@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: capability-broker-artifacts
+  namespace: workspaces-system
+type: Opaque
+stringData:
+  # Used with ARTIFACT_S3_* env vars to upload redacted job logs/results to MinIO/S3.
+  access_key_id: "<minio_access_key>"
+  secret_access_key: "<minio_secret_access_key>"
+

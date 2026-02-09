@@ -87,6 +87,23 @@ func (r *AgentJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 		}
 
+		// Per-job broker auth (token Secret is created by the broker when launching
+		// GitHub-triggered jobs). Optional for direct/admin-created AgentJobs.
+		brokerSecretName := fmt.Sprintf("agentjob-%s-broker", aj.Name)
+		brokerEnv := []corev1.EnvVar{
+			{Name: "WORKSPACES_BROKER_URL", Value: "http://capability-broker.workspaces-system.svc.cluster.local:8080"},
+			{
+				Name: "WORKSPACES_BROKER_JOB_TOKEN",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: brokerSecretName},
+						Key:                  "token",
+						Optional:             ptrTo(true),
+					},
+				},
+			},
+		}
+
 		if strings.TrimSpace(aj.Spec.Script) != "" {
 			// Script mode: run via the workspaces agent runner to ensure output is
 			// capped + redacted in logs and exec metadata is emitted.
@@ -146,7 +163,7 @@ fi
 							},
 						},
 					}...),
-					VolumeMounts:   []corev1.VolumeMount{{Name: "workspace", MountPath: "/workspace"}},
+					VolumeMounts:    []corev1.VolumeMount{{Name: "workspace", MountPath: "/workspace"}},
 					SecurityContext: sec,
 				}
 				pod.InitContainers = append(pod.InitContainers, checkout)
@@ -157,6 +174,7 @@ fi
 				corev1.EnvVar{Name: "WORKSPACES_WORKDIR", Value: workdir},
 				corev1.EnvVar{Name: "WORKSPACES_REPO_DIR", Value: repoDir},
 			)
+			mainEnv = append(mainEnv, brokerEnv...)
 			if aj.Spec.GitHub != nil {
 				mainEnv = append(mainEnv,
 					corev1.EnvVar{Name: "WORKSPACES_GITHUB_REPO", Value: strings.TrimSpace(aj.Spec.GitHub.Repo)},
@@ -186,7 +204,7 @@ fi
 					Image:     aj.Spec.Image,
 					Command:   aj.Spec.Command,
 					Args:      aj.Spec.Args,
-					Env:       workspaceEnv,
+					Env:       append(workspaceEnv, brokerEnv...),
 					Resources: aj.Spec.Resources,
 					VolumeMounts: []corev1.VolumeMount{
 						{Name: "workspace", MountPath: "/workspace"},
@@ -221,6 +239,15 @@ fi
 		aj.Status.Phase = phase
 		aj.Status.JobName = jobName
 		_ = r.Status().Patch(ctx, &aj, patch)
+	}
+
+	// Cleanup secrets + auto-grants after completion. These resources are owned
+	// by AgentJob for GC when AgentJob is deleted, but we want them gone ASAP on
+	// success/failure.
+	if phase == "Succeeded" || phase == "Failed" {
+		_ = r.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("agentjob-%s-github", aj.Name), Namespace: aj.Namespace}})
+		_ = r.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("agentjob-%s-broker", aj.Name), Namespace: aj.Namespace}})
+		_ = r.Delete(ctx, &workspacesv1alpha1.NetworkGrant{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("autogrant-%s-github", aj.Name), Namespace: aj.Namespace}})
 	}
 
 	return ctrl.Result{}, nil

@@ -44,7 +44,8 @@ func (r *NetworkGrantReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Validate spec. Without an admission webhook, the controller must ensure
 	// invalid requests never produce enforceable network policy.
-	if err := validateNetworkGrantSpec(&grant); err != nil {
+	matchLabels, err := validateAndResolveNetworkGrantMatchLabels(&grant)
+	if err != nil {
 		_ = r.Delete(ctx, cnp)
 		if grant.Status.Active {
 			patch := client.MergeFrom(grant.DeepCopy())
@@ -91,16 +92,6 @@ func (r *NetworkGrantReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	if len(grant.Spec.PodSelector.MatchExpressions) != 0 {
-		// MVP: keep it simple; require matchLabels only.
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-	}
-
-	matchLabels := grant.Spec.PodSelector.MatchLabels
-	if len(matchLabels) == 0 {
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-	}
-
 	spec := map[string]any{
 		"endpointSelector": map[string]any{
 			"matchLabels": matchLabels,
@@ -108,7 +99,7 @@ func (r *NetworkGrantReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		"egress": buildCiliumEgress(grant.Spec.Egress),
 	}
 
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, cnp, func() error {
+	op, err := controllerutil.CreateOrUpdate(ctx, r.Client, cnp, func() error {
 		if err := unstructured.SetNestedField(cnp.Object, spec, "spec"); err != nil {
 			return err
 		}
@@ -117,6 +108,7 @@ func (r *NetworkGrantReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	_ = op
 
 	if !grant.Status.Active {
 		patch := client.MergeFrom(grant.DeepCopy())
@@ -134,22 +126,37 @@ func (r *NetworkGrantReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func validateNetworkGrantSpec(grant *workspacesv1alpha1.NetworkGrant) error {
-	// Selector must be explicit and stable (MVP keeps it simple: matchLabels only).
-	if len(grant.Spec.PodSelector.MatchExpressions) != 0 {
-		return fmt.Errorf("podSelector.matchExpressions not supported; use matchLabels only")
-	}
-	if len(grant.Spec.PodSelector.MatchLabels) == 0 {
-		return fmt.Errorf("podSelector.matchLabels is required")
+func validateAndResolveNetworkGrantMatchLabels(grant *workspacesv1alpha1.NetworkGrant) (map[string]string, error) {
+	// Selector must be explicit and stable.
+	var matchLabels map[string]string
+	if grant.Spec.AgentJobRef != nil && strings.TrimSpace(grant.Spec.AgentJobRef.Name) != "" {
+		if grant.Spec.PodSelector != nil {
+			return nil, fmt.Errorf("podSelector is not allowed when agentJobRef is set")
+		}
+		matchLabels = map[string]string{
+			labelApp:      "agent",
+			labelAgentJob: strings.TrimSpace(grant.Spec.AgentJobRef.Name),
+		}
+	} else {
+		if grant.Spec.PodSelector == nil {
+			return nil, fmt.Errorf("agentJobRef or podSelector is required")
+		}
+		if len(grant.Spec.PodSelector.MatchExpressions) != 0 {
+			return nil, fmt.Errorf("podSelector.matchExpressions not supported; use matchLabels only")
+		}
+		if len(grant.Spec.PodSelector.MatchLabels) == 0 {
+			return nil, fmt.Errorf("podSelector.matchLabels is required")
+		}
+		matchLabels = grant.Spec.PodSelector.MatchLabels
 	}
 
 	purpose := strings.TrimSpace(grant.Spec.Purpose)
 	if purpose == "" {
-		return fmt.Errorf("purpose is required")
+		return nil, fmt.Errorf("purpose is required")
 	}
 
 	if grant.Spec.Approved && strings.TrimSpace(grant.Spec.ApprovedBy) == "" {
-		return fmt.Errorf("approvedBy is required when approved is true")
+		return nil, fmt.Errorf("approvedBy is required when approved is true")
 	}
 
 	mode := grant.Spec.PolicyMode
@@ -157,7 +164,7 @@ func validateNetworkGrantSpec(grant *workspacesv1alpha1.NetworkGrant) error {
 		mode = workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN
 	}
 	if mode != workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN {
-		return fmt.Errorf("policyMode %q is not supported (MVP supports STRICT_FQDN only)", mode)
+		return nil, fmt.Errorf("policyMode %q is not supported (MVP supports STRICT_FQDN only)", mode)
 	}
 
 	proto := grant.Spec.Protocol
@@ -165,32 +172,32 @@ func validateNetworkGrantSpec(grant *workspacesv1alpha1.NetworkGrant) error {
 		proto = workspacesv1alpha1.NetworkGrantProtocolTCP
 	}
 	if proto != workspacesv1alpha1.NetworkGrantProtocolTCP {
-		return fmt.Errorf("protocol %q is not supported (MVP supports TCP only)", proto)
+		return nil, fmt.Errorf("protocol %q is not supported (MVP supports TCP only)", proto)
 	}
 
 	if len(grant.Spec.Egress) == 0 {
-		return fmt.Errorf("egress must contain at least one destination")
+		return nil, fmt.Errorf("egress must contain at least one destination")
 	}
 
 	for i, r := range grant.Spec.Egress {
 		host := strings.TrimSpace(r.Host)
 		if host == "" {
-			return fmt.Errorf("egress[%d].host is required", i)
+			return nil, fmt.Errorf("egress[%d].host is required", i)
 		}
 		if strings.ContainsAny(host, " \t\r\n") {
-			return fmt.Errorf("egress[%d].host must not contain whitespace", i)
+			return nil, fmt.Errorf("egress[%d].host must not contain whitespace", i)
 		}
 		if strings.Contains(host, "*") {
-			return fmt.Errorf("egress[%d].host must be an exact FQDN (no wildcards)", i)
+			return nil, fmt.Errorf("egress[%d].host must be an exact FQDN (no wildcards)", i)
 		}
 		if strings.ContainsAny(host, "/:") {
-			return fmt.Errorf("egress[%d].host must be a hostname only (no scheme/path/port)", i)
+			return nil, fmt.Errorf("egress[%d].host must be a hostname only (no scheme/path/port)", i)
 		}
 		if strings.HasPrefix(host, ".") || strings.HasSuffix(host, ".") {
-			return fmt.Errorf("egress[%d].host must not start or end with '.'", i)
+			return nil, fmt.Errorf("egress[%d].host must not start or end with '.'", i)
 		}
 		if len(host) > 253 {
-			return fmt.Errorf("egress[%d].host is too long", i)
+			return nil, fmt.Errorf("egress[%d].host is too long", i)
 		}
 
 		ports := r.Ports
@@ -199,15 +206,15 @@ func validateNetworkGrantSpec(grant *workspacesv1alpha1.NetworkGrant) error {
 		}
 		for _, p := range ports {
 			if p <= 0 || p > 65535 {
-				return fmt.Errorf("egress[%d] has invalid port %d", i, p)
+				return nil, fmt.Errorf("egress[%d] has invalid port %d", i, p)
 			}
 			if !grant.Spec.AllowNon443 && p != 443 {
-				return fmt.Errorf("egress[%d] requests non-443 port %d but allowNon443 is false", i, p)
+				return nil, fmt.Errorf("egress[%d] requests non-443 port %d but allowNon443 is false", i, p)
 			}
 		}
 	}
 
-	return nil
+	return matchLabels, nil
 }
 
 func buildCiliumEgress(rules []workspacesv1alpha1.NetworkGrantEgressRule) []any {

@@ -36,7 +36,7 @@ func (r *HomeTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	labels := map[string]string{
-		labelApp: "hometemplate",
+		labelApp:                               "hometemplate",
 		"workspaces.platform.dev/hometemplate": ht.Name,
 	}
 
@@ -258,4 +258,3 @@ func (r *HomeTemplateReconciler) enforceSnapshotRetention(ctx context.Context, n
 	}
 	return nil
 }
-

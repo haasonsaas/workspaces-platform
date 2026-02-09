@@ -21,13 +21,14 @@ spec:
           env:
             - name: LISTEN_ADDR
               value: ":8080"
-            # Required for agent-facing endpoints (/v1/network-grants, /v1/github/open-pr).
-            - name: BROKER_AGENT_TOKEN
+            # Required: per-job auth signing secret (HS256). Used for agent-facing endpoints
+            # (/v1/network-grants, /v1/github/open-pr).
+            - name: BROKER_JOB_JWT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: capability-broker-secrets
-                  key: agent_token
-                  optional: true
+                  key: job_jwt_secret
+                  optional: false
             # Optional: set to require admin auth for approval endpoints.
             - name: BROKER_ADMIN_TOKEN
               valueFrom:
@@ -147,6 +148,92 @@ spec:
                 configMapKeyRef:
                   name: capability-broker-config
                   key: agent_default_script
+                  optional: true
+            # Optional: concurrency + autogrant controls for GitHub-triggered jobs.
+            - name: AGENT_MAX_CONCURRENT
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: agent_max_concurrent
+                  optional: true
+            - name: AGENT_MAX_CONCURRENT_PER_REPO
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: agent_max_concurrent_per_repo
+                  optional: true
+            - name: AGENT_AUTO_GRANT_GITHUB
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: agent_auto_grant_github
+                  optional: true
+            - name: AGENT_AUTO_GRANT_TTL_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: agent_auto_grant_ttl_seconds
+                  optional: true
+            - name: AGENT_JOB_TOKEN_TTL_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: agent_job_token_ttl_seconds
+                  optional: true
+            # Optional: artifact store (MinIO/S3) for agent logs/results.
+            - name: ARTIFACT_S3_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: artifact_s3_endpoint
+                  optional: true
+            - name: ARTIFACT_S3_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: artifact_s3_bucket
+                  optional: true
+            - name: ARTIFACT_S3_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: artifact_s3_region
+                  optional: true
+            - name: ARTIFACT_S3_PREFIX
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: artifact_s3_prefix
+                  optional: true
+            - name: ARTIFACT_S3_FORCE_PATH_STYLE
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: artifact_s3_force_path_style
+                  optional: true
+            - name: ARTIFACT_PUBLISH_LINKS
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: artifact_publish_links
+                  optional: true
+            - name: ARTIFACT_PRESIGN_TTL_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: artifact_presign_ttl_seconds
+                  optional: true
+            - name: ARTIFACT_S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: capability-broker-artifacts
+                  key: access_key_id
+                  optional: true
+            - name: ARTIFACT_S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: capability-broker-artifacts
+                  key: secret_access_key
                   optional: true
             # Optional: check-runs for agent-job triggers.
             - name: GITHUB_ENABLE_CHECK_RUNS

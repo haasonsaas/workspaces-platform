@@ -135,8 +135,11 @@ Security properties:
 - Broker logs audit events without storing patch bodies in logs.
 
 MVP auth:
-- Agent-facing endpoints require `X-Broker-Agent-Token` (or admin token).
-- Approval endpoints require `X-Broker-Admin-Token` (or `X-Broker-Webhook-Token` for GitHub comment approvals).
+- Agent-facing endpoints require a **per-job token** minted by the broker (or admin token):
+  - `Authorization: Bearer <token>` or `X-Workspaces-Job-Token: <token>`
+  - jobs receive this as env `WORKSPACES_BROKER_JOB_TOKEN` (Secret: `agentjob-<name>-broker`)
+  - broker must be configured with `BROKER_JOB_JWT_SECRET` to mint/verify these tokens
+- Approval endpoints require `X-Broker-Admin-Token` (or `X-Broker-Webhook-Token` for GitHub comment approvals / GitHub-triggered job creation).
 
 ### 3) Gateway (Tailscale Edge)
 
@@ -265,5 +268,5 @@ MVP implementation logs audit events as JSON to broker logs; the next step is sh
    - org/user concurrency caps for agent jobs
 5. GitHub-native triggers:
    - PR comment `/agent run` (implemented)
-   - check-run creation + completion reporting (implemented; expand output + artifacts)
+   - check-run creation + completion reporting (implemented; includes redacted log tail and optional MinIO/S3 artifact upload when configured)
    - richer status reporting (link logs/artifacts, per-profile behavior)

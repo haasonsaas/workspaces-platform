@@ -52,13 +52,13 @@ wsctl agent run-pr --repo owner/repo --pr 123
 
 ## Network Grants (Broker)
 
-Request a grant (requires agent token):
+Request a grant (requires admin token for `wsctl`; in-cluster jobs use per-job auth):
 ```bash
 export WORKSPACES_BROKER_URL=http://capability-broker.workspaces-system.svc.cluster.local:8080
-export BROKER_AGENT_TOKEN=...
+export BROKER_ADMIN_TOKEN=...
 
 wsctl netgrant request \
-  --selector 'workspaces.platform.dev/app=agent,workspaces.platform.dev/agentjob=example' \
+  --agentjob example \
   --purpose 'fetch GitHub metadata' \
   --egress github.com:443 \
   --egress api.github.com:443
@@ -73,7 +73,7 @@ wsctl netgrant approve --name netgrant-abc123 --approved-by admin --ttl 1800
 
 ## Broker-Only PR Writes
 
-Open a PR from a unified diff (requires agent token):
+Open a PR from a unified diff (requires admin token for `wsctl`; in-cluster jobs use per-job auth):
 ```bash
 wsctl github open-pr \
   --repo owner/repo \

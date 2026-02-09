@@ -11,10 +11,8 @@ spec:
   reason: "allow GitHub for this job"
   purpose: "allow GitHub API access for fetching PR metadata"
   ttlSeconds: 1800
-  podSelector:
-    matchLabels:
-      workspaces.platform.dev/app: agent
-      workspaces.platform.dev/agentjob: example
+  agentJobRef:
+    name: example
   egress:
     - host: github.com
       ports: [443]

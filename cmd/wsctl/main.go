@@ -60,7 +60,6 @@ Usage:
 
 Env:
   WORKSPACES_BROKER_URL   Base URL for capability-broker (e.g. http://capability-broker.workspaces-system.svc.cluster.local:8080)
-  BROKER_AGENT_TOKEN      Token for agent endpoints (X-Broker-Agent-Token)
   BROKER_ADMIN_TOKEN      Token for admin endpoints (X-Broker-Admin-Token)
   BROKER_WEBHOOK_TOKEN    Token for webhook endpoints (X-Broker-Webhook-Token)
 
@@ -350,7 +349,7 @@ func cmdNetgrant(args []string) {
 		fs := flag.NewFlagSet("netgrant request", flag.ExitOnError)
 		var (
 			namespace   = fs.String("namespace", "agents", "Namespace")
-			selector    = fs.String("selector", "", "Pod selector matchLabels (k=v,k2=v2)")
+			agentJob    = fs.String("agentjob", "", "AgentJob name the grant applies to")
 			purpose     = fs.String("purpose", "", "Purpose (required)")
 			ttl         = fs.Int("ttl", 1800, "TTL seconds")
 			allowNon443 = fs.Bool("allow-non-443", false, "Allow non-443 ports")
@@ -365,7 +364,7 @@ func cmdNetgrant(args []string) {
 		if strings.TrimSpace(*broker) == "" {
 			die("missing WORKSPACES_BROKER_URL (or --broker)")
 		}
-		if strings.TrimSpace(*selector) == "" || strings.TrimSpace(*purpose) == "" {
+		if strings.TrimSpace(*agentJob) == "" || strings.TrimSpace(*purpose) == "" {
 			fs.Usage()
 			os.Exit(2)
 		}
@@ -373,20 +372,17 @@ func cmdNetgrant(args []string) {
 			die("at least one --egress is required")
 		}
 
-		agentToken := strings.TrimSpace(os.Getenv("BROKER_AGENT_TOKEN"))
-		if agentToken == "" {
-			die("missing BROKER_AGENT_TOKEN")
+		adminToken := strings.TrimSpace(os.Getenv("BROKER_ADMIN_TOKEN"))
+		if adminToken == "" {
+			die("missing BROKER_ADMIN_TOKEN")
 		}
-
-		sel, err := parseLabelMap(*selector)
-		dieIf(err)
 
 		rules, err := parseEgressRules(egress)
 		dieIf(err)
 
 		payload := map[string]any{
 			"namespace":   strings.TrimSpace(*namespace),
-			"podSelector": sel,
+			"agentJob":    strings.TrimSpace(*agentJob),
 			"policyMode":  "STRICT_FQDN",
 			"protocol":    "TCP",
 			"purpose":     strings.TrimSpace(*purpose),
@@ -398,7 +394,7 @@ func cmdNetgrant(args []string) {
 			payload["github"] = map[string]any{"repo": strings.TrimSpace(*ghRepo), "pullNumber": *ghPR}
 		}
 
-		resp, err := brokerPostJSON(context.Background(), *broker+"/v1/network-grants", "X-Broker-Agent-Token", agentToken, payload)
+		resp, err := brokerPostJSON(context.Background(), *broker+"/v1/network-grants", "X-Broker-Admin-Token", adminToken, payload)
 		dieIf(err)
 		fmt.Println(string(resp))
 
@@ -461,9 +457,9 @@ func cmdGitHub(args []string) {
 			os.Exit(2)
 		}
 
-		agentToken := strings.TrimSpace(os.Getenv("BROKER_AGENT_TOKEN"))
-		if agentToken == "" {
-			die("missing BROKER_AGENT_TOKEN")
+		adminToken := strings.TrimSpace(os.Getenv("BROKER_ADMIN_TOKEN"))
+		if adminToken == "" {
+			die("missing BROKER_ADMIN_TOKEN")
 		}
 
 		patchBytes, err := os.ReadFile(*patchFile)
@@ -478,7 +474,7 @@ func cmdGitHub(args []string) {
 			payload["base"] = strings.TrimSpace(*base)
 		}
 
-		resp, err := brokerPostJSON(context.Background(), strings.TrimSpace(*broker)+"/v1/github/open-pr", "X-Broker-Agent-Token", agentToken, payload)
+		resp, err := brokerPostJSON(context.Background(), strings.TrimSpace(*broker)+"/v1/github/open-pr", "X-Broker-Admin-Token", adminToken, payload)
 		dieIf(err)
 		fmt.Println(string(resp))
 

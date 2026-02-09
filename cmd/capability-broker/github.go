@@ -272,7 +272,7 @@ func (s *server) handleGitHubOpenPR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.requireAgent(r); err != nil {
+	if err := s.requireJobOrAdmin(r, ""); err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
 		return
 	}
@@ -615,6 +615,10 @@ func formatNetworkGrantApprovalComment(ng *workspacesv1alpha1.NetworkGrant) stri
 	b.WriteString("Grant:\n")
 	b.WriteString("- Namespace: `" + ng.Namespace + "`\n")
 	b.WriteString("- Name: `" + ng.Name + "`\n")
+	if ng.Spec.AgentJobRef != nil && strings.TrimSpace(ng.Spec.AgentJobRef.Name) != "" {
+		b.WriteString("- AppliesTo: AgentJob `" + ng.Namespace + "/" + strings.TrimSpace(ng.Spec.AgentJobRef.Name) + "`\n")
+		b.WriteString("- Selector: `workspaces.platform.dev/app=agent,workspaces.platform.dev/agentjob=" + strings.TrimSpace(ng.Spec.AgentJobRef.Name) + "`\n")
+	}
 	if strings.TrimSpace(ng.Spec.Purpose) != "" {
 		b.WriteString("- Purpose: " + strings.TrimSpace(ng.Spec.Purpose) + "\n")
 	}
@@ -1114,7 +1118,7 @@ func (g *githubService) createCheckRunInProgress(ctx context.Context, token, own
 	return parsed.ID, strings.TrimSpace(parsed.HTMLURL), nil
 }
 
-func (g *githubService) completeCheckRun(ctx context.Context, repo string, checkRunID int64, conclusion, summary string) (string, error) {
+func (g *githubService) completeCheckRun(ctx context.Context, repo string, checkRunID int64, conclusion, summary, text string) (string, error) {
 	repo = strings.ToLower(strings.TrimSpace(repo))
 	if repo == "" || !strings.Contains(repo, "/") {
 		return "", fmt.Errorf("invalid repo %q", repo)
@@ -1145,6 +1149,9 @@ func (g *githubService) completeCheckRun(ctx context.Context, repo string, check
 			"title":   "Agent job " + conclusion,
 			"summary": strings.TrimSpace(summary),
 		},
+	}
+	if strings.TrimSpace(text) != "" {
+		payload["output"].(map[string]any)["text"] = strings.TrimSpace(text)
 	}
 	b, _ := json.Marshal(payload)
 

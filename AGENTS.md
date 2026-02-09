@@ -99,8 +99,11 @@ Rules:
 - If capturing agent output, do secret redaction by default.
 
 Auth (MVP):
-- Agent-facing endpoints require `X-Broker-Agent-Token` (or admin token).
-- Approval endpoints require `X-Broker-Admin-Token` (or `X-Broker-Webhook-Token` for GitHub comment approvals).
+- Agent-facing endpoints require a **per-job token** minted by the broker (or admin token):
+  - `Authorization: Bearer <token>` or `X-Workspaces-Job-Token: <token>`
+  - in-cluster jobs receive this as env `WORKSPACES_BROKER_JOB_TOKEN` (Secret: `agentjob-<name>-broker`)
+  - broker must be configured with `BROKER_JOB_JWT_SECRET` to mint/verify these tokens
+- Approval endpoints require `X-Broker-Admin-Token` (or `X-Broker-Webhook-Token` for GitHub comment approvals / GitHub-triggered job creation).
 
 ## GitHub App Integration (Broker-Only Writes)
 
@@ -134,7 +137,7 @@ Default mode:
 - Use `ws-proxy` on the gateway to port-forward to the desktop Pod (Kubernetes API mediated) and shuttle bytes.
 
 Privileged mode (optional):
-- Gateway can route to ClusterIP Services directly: use `ProxyCommand ... nc %h %p` and point HostName at the `*.svc.cluster.local` Service.
+- Gateway can route to ClusterIP Services directly. Treat this as a **more privileged** gateway mode with separate hardening/monitoring; default to port-forward (`ws-proxy`) instead.
 
 See: `docs/access.md`.
 
@@ -147,8 +150,9 @@ make test
 
 Generate CRDs:
 ```bash
-go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5 \
-  crd:crdVersions=v1 paths=./api/... output:crd:dir=./k8s/crds
+go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.4 object paths=./api/v1alpha1
+go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.4 \
+  crd:crdVersions=v1 paths=./api/v1alpha1 output:crd:dir=./k8s/crds
 ```
 
 Render manifests:

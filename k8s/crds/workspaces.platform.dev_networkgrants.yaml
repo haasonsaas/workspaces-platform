@@ -39,6 +39,22 @@ spec:
             type: object
           spec:
             properties:
+              agentJobRef:
+                description: |-
+                  AgentJobRef selects the AgentJob this grant applies to.
+                  When set, the controller derives a stable pod selector based on the
+                  AgentJob name (labels: workspaces.platform.dev/app=agent and
+                  workspaces.platform.dev/agentjob=<name>).
+                properties:
+                  name:
+                    description: |-
+                      Name is the AgentJob name this grant applies to.
+                      The grant must be created in the same namespace as the AgentJob.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
               allowNon443:
                 description: AllowNon443 allows non-443 ports in egress rules. Defaults
                   to false.
@@ -70,7 +86,9 @@ spec:
                 minItems: 1
                 type: array
               podSelector:
-                description: PodSelector selects the pods this grant applies to.
+                description: |-
+                  PodSelector selects the pods this grant applies to.
+                  Deprecated: prefer AgentJobRef for stable least-privilege binding.
                 properties:
                   matchExpressions:
                     description: matchExpressions is a list of label selector requirements.
@@ -141,7 +159,6 @@ spec:
                 type: integer
             required:
             - egress
-            - podSelector
             - purpose
             type: object
           status:

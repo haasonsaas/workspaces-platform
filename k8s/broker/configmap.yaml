@@ -42,6 +42,28 @@ data:
     fi
     echo "No .workspaces/agent.sh found; nothing to do."
 
+  # Concurrency controls for GitHub-triggered jobs (0 = unlimited).
+  agent_max_concurrent: "0"
+  agent_max_concurrent_per_repo: "0"
+
+  # Keep baseline agent egress strict default-deny; allow only minimal GitHub egress
+  # for PR-scoped jobs via a short-lived autogrant.
+  agent_auto_grant_github: "true"
+  agent_auto_grant_ttl_seconds: "7200"
+
+  # Per-job broker token TTL (job identity for calling agent-facing broker endpoints).
+  agent_job_token_ttl_seconds: "7200"
+
+  # Optional: artifact store (MinIO/S3) for job logs/results (used in check-runs).
+  # Keep endpoint/bucket empty to disable uploads.
+  artifact_s3_endpoint: ""
+  artifact_s3_bucket: ""
+  artifact_s3_region: "us-east-1"
+  artifact_s3_prefix: "workspaces"
+  artifact_s3_force_path_style: "true"
+  artifact_publish_links: "false"
+  artifact_presign_ttl_seconds: "86400"
+
   # Optional: check-runs for /agent run workflow (requires GitHub App permissions).
   github_enable_check_runs: "false"
   github_check_run_name: "workspaces-agent"

@@ -25,8 +25,8 @@ import (
 )
 
 var (
-	errHomeSeedNotReady  = errors.New("home_seed_not_ready")
-	errNoSnapshotSource  = errors.New("no_snapshot_source_configured")
+	errHomeSeedNotReady = errors.New("home_seed_not_ready")
+	errNoSnapshotSource = errors.New("no_snapshot_source_configured")
 )
 
 type DesktopReconciler struct {

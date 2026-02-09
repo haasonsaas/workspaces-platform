@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,25 +15,33 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	workspacesv1alpha1 "workspaces-platform/api/v1alpha1"
+	"workspaces-platform/internal/artifacts"
 	auditpkg "workspaces-platform/internal/audit"
+	"workspaces-platform/internal/redact"
 )
 
 type server struct {
-	k8s client.Client
+	k8s    client.Client
+	kube   kubernetes.Interface
 	scheme *runtime.Scheme
 
 	audit auditpkg.Emitter
 
-	agentToken   string
+	artifacts *artifacts.S3Store
+	redactor  *redact.Redactor
+
+	jobJWTSecret []byte
 	adminToken   string
 	webhookToken string
 
@@ -42,10 +51,13 @@ type server struct {
 func main() {
 	var (
 		listenAddr   = getenv("LISTEN_ADDR", ":8080")
-		agentToken   = os.Getenv("BROKER_AGENT_TOKEN")
+		jobJWTSecret = strings.TrimSpace(os.Getenv("BROKER_JOB_JWT_SECRET"))
 		adminToken   = os.Getenv("BROKER_ADMIN_TOKEN")
 		webhookToken = os.Getenv("BROKER_WEBHOOK_TOKEN")
 	)
+	if jobJWTSecret == "" {
+		log.Fatalf("BROKER_JOB_JWT_SECRET is required (per-job auth for agent endpoints)")
+	}
 
 	auditEmitter, err := auditpkg.NewFromEnv("capability-broker")
 	if err != nil {
@@ -62,15 +74,41 @@ func main() {
 	if err != nil {
 		log.Fatalf("k8s client: %v", err)
 	}
+	kubeClient, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		log.Fatalf("k8s clientset: %v", err)
+	}
+
+	// Optional: artifact store for job logs/results (MinIO/S3). If misconfigured,
+	// we keep the broker running and fall back to kubectl log hints in check-runs.
+	var artifactStore *artifacts.S3Store
+	if strings.TrimSpace(os.Getenv("ARTIFACT_S3_ENDPOINT")) != "" || strings.TrimSpace(os.Getenv("ARTIFACT_S3_BUCKET")) != "" {
+		st, err := artifacts.NewS3FromEnv(context.Background())
+		if err != nil {
+			log.Printf("artifact store disabled: %v", err)
+		} else {
+			artifactStore = st
+			log.Printf("artifact store enabled")
+		}
+	}
 
 	ghSvc, ghErr := newGitHubServiceFromEnv(auditEmitter)
 	if ghErr != nil {
 		log.Printf("github integration disabled: %v", ghErr)
 	}
 
-	s := &server{k8s: k8sClient, scheme: scheme, adminToken: adminToken, gh: ghSvc, audit: auditEmitter}
-	s.agentToken = agentToken
-	s.webhookToken = webhookToken
+	s := &server{
+		k8s:          k8sClient,
+		scheme:       scheme,
+		kube:         kubeClient,
+		jobJWTSecret: []byte(jobJWTSecret),
+		adminToken:   adminToken,
+		webhookToken: webhookToken,
+		gh:           ghSvc,
+		audit:        auditEmitter,
+		artifacts:    artifactStore,
+		redactor:     redact.NewDefault(),
+	}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -103,7 +141,8 @@ type createNetworkGrantRequest struct {
 	// Optional. If empty, server will generate a name.
 	Name string `json:"name,omitempty"`
 
-	PodSelector map[string]string `json:"podSelector"`
+	// AgentJob is the AgentJob name this grant applies to (same namespace).
+	AgentJob string `json:"agentJob"`
 
 	PolicyMode workspacesv1alpha1.NetworkGrantPolicyMode `json:"policyMode,omitempty"`
 	Protocol   workspacesv1alpha1.NetworkGrantProtocol   `json:"protocol,omitempty"`
@@ -125,11 +164,6 @@ type createNetworkGrantRequest struct {
 }
 
 func (s *server) handleCreateNetworkGrant(w http.ResponseWriter, r *http.Request) {
-	if err := s.requireAgent(r); err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
-		return
-	}
-
 	ctx := r.Context()
 
 	var req createNetworkGrantRequest
@@ -145,8 +179,12 @@ func (s *server) handleCreateNetworkGrant(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "namespace_not_allowed"})
 		return
 	}
-	if len(req.PodSelector) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "podSelector_required"})
+	if strings.TrimSpace(req.AgentJob) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "agentJob_required"})
+		return
+	}
+	if err := s.requireJobOrAdmin(r, strings.TrimSpace(req.AgentJob)); err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
 		return
 	}
 	if strings.TrimSpace(req.Purpose) == "" {
@@ -172,7 +210,7 @@ func (s *server) handleCreateNetworkGrant(w http.ResponseWriter, r *http.Request
 			Namespace: req.Namespace,
 		},
 		Spec: workspacesv1alpha1.NetworkGrantSpec{
-			PodSelector: metav1.LabelSelector{MatchLabels: req.PodSelector},
+			AgentJobRef: &workspacesv1alpha1.NetworkGrantAgentJobRef{Name: strings.TrimSpace(req.AgentJob)},
 			PolicyMode:  req.PolicyMode,
 			Protocol:    req.Protocol,
 			Purpose:     strings.TrimSpace(req.Purpose),
@@ -208,7 +246,7 @@ func (s *server) handleCreateNetworkGrant(w http.ResponseWriter, r *http.Request
 			"remote_addr":   r.RemoteAddr,
 			"namespace":     ng.Namespace,
 			"name":          ng.Name,
-			"pod_selector":  req.PodSelector,
+			"agentjob":      strings.TrimSpace(req.AgentJob),
 			"egress_count":  len(req.Egress),
 			"purpose":       strings.TrimSpace(req.Purpose),
 			"ttl_seconds":   req.TTLSeconds,
@@ -432,6 +470,49 @@ func (s *server) handleCreateAgentJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Concurrency caps (cost + blast radius control). Only enforced on broker-created
+	// jobs (GitHub-triggered); direct CR creates bypass this and should be reserved
+	// for admins.
+	maxConcurrent := 0
+	if raw := strings.TrimSpace(getenv("AGENT_MAX_CONCURRENT", "0")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
+			maxConcurrent = n
+		}
+	}
+	maxConcurrentPerRepo := 0
+	if raw := strings.TrimSpace(getenv("AGENT_MAX_CONCURRENT_PER_REPO", "0")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
+			maxConcurrentPerRepo = n
+		}
+	}
+	if maxConcurrent > 0 || maxConcurrentPerRepo > 0 {
+		var list workspacesv1alpha1.AgentJobList
+		if err := s.k8s.List(ctx, &list, client.InNamespace("agents")); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "list_failed"})
+			return
+		}
+		activeTotal := 0
+		activeRepo := 0
+		for _, item := range list.Items {
+			phase := strings.TrimSpace(item.Status.Phase)
+			if phase == "Succeeded" || phase == "Failed" {
+				continue
+			}
+			activeTotal++
+			if item.Annotations != nil && strings.ToLower(strings.TrimSpace(item.Annotations["workspaces.platform.dev/github-repo"])) == repo {
+				activeRepo++
+			}
+		}
+		if maxConcurrent > 0 && activeTotal >= maxConcurrent {
+			writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "agentjob_concurrency_limit"})
+			return
+		}
+		if maxConcurrentPerRepo > 0 && activeRepo >= maxConcurrentPerRepo {
+			writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "agentjob_repo_concurrency_limit"})
+			return
+		}
+	}
+
 	defaultImage := strings.TrimSpace(getenv("AGENT_DEFAULT_IMAGE", "ghcr.io/workspaces-platform/agent-runner:latest"))
 	if defaultImage == "" {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "agent_default_image_not_configured"})
@@ -530,6 +611,74 @@ echo "No .workspaces/agent.sh found; nothing to do."
 		return
 	}
 
+	// Pre-approve minimal GitHub egress for this job via NetworkGrant so the
+	// baseline agent policy can remain strict default-deny.
+	autoGrantEnabled := strings.EqualFold(strings.TrimSpace(getenv("AGENT_AUTO_GRANT_GITHUB", "true")), "true")
+	var autoGrant *workspacesv1alpha1.NetworkGrant
+	if autoGrantEnabled {
+		autoTTL := int32(7200)
+		if raw := strings.TrimSpace(getenv("AGENT_AUTO_GRANT_TTL_SECONDS", "7200")); raw != "" {
+			if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+				autoTTL = int32(n)
+			}
+		}
+		grantName := fmt.Sprintf("autogrant-%s-github", jobName)
+		if len(grantName) > 63 {
+			grantName = grantName[:63]
+		}
+		ng := &workspacesv1alpha1.NetworkGrant{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      grantName,
+				Namespace: ns,
+				Labels: map[string]string{
+					"workspaces.platform.dev/app":       "netgrant",
+					"workspaces.platform.dev/agentjob":  jobName,
+					"workspaces.platform.dev/autogrant": "github",
+				},
+			},
+			Spec: workspacesv1alpha1.NetworkGrantSpec{
+				AgentJobRef: &workspacesv1alpha1.NetworkGrantAgentJobRef{Name: jobName},
+				PolicyMode:  workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN,
+				Protocol:    workspacesv1alpha1.NetworkGrantProtocolTCP,
+				Purpose:     "repo checkout + GitHub API",
+				Egress: []workspacesv1alpha1.NetworkGrantEgressRule{
+					{Host: "github.com", Ports: []int32{443}},
+					{Host: "api.github.com", Ports: []int32{443}},
+					{Host: "objects.githubusercontent.com", Ports: []int32{443}},
+					{Host: "codeload.github.com", Ports: []int32{443}},
+				},
+				TTLSeconds:  autoTTL,
+				Approved:    true,
+				ApprovedBy:  "broker",
+				Reason:      fmt.Sprintf("auto: github access for %s#%d", repo, req.GitHub.PullNumber),
+				AllowNon443: false,
+			},
+		}
+		if err := s.k8s.Create(ctx, ng); err != nil {
+			if !apierrors.IsAlreadyExists(err) {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "autogrant_create_failed"})
+				return
+			}
+			// If it exists (retries), re-use it.
+			var existing workspacesv1alpha1.NetworkGrant
+			if gerr := s.k8s.Get(ctx, client.ObjectKey{Namespace: ns, Name: grantName}, &existing); gerr == nil {
+				autoGrant = &existing
+			}
+		} else {
+			autoGrant = ng
+		}
+		if s.audit != nil {
+			s.audit.Emit("networkgrant.autogrant", map[string]any{
+				"namespace":  ns,
+				"name":       ng.Name,
+				"agentjob":   jobName,
+				"repo":       repo,
+				"pullNumber": req.GitHub.PullNumber,
+				"ttlSeconds": autoTTL,
+			})
+		}
+	}
+
 	annotations := map[string]string{
 		"workspaces.platform.dev/source":             "github",
 		"workspaces.platform.dev/github-repo":        repo,
@@ -571,6 +720,14 @@ echo "No .workspaces/agent.sh found; nothing to do."
 		return
 	}
 
+	// Best-effort: attach the autogrant to the AgentJob for GC (ownerRef).
+	if autoGrant != nil {
+		before := autoGrant.DeepCopy()
+		if err := controllerutil.SetControllerReference(aj, autoGrant, s.scheme); err == nil {
+			_ = s.k8s.Patch(ctx, autoGrant, client.MergeFrom(before))
+		}
+	}
+
 	// Create a short-lived repo read token secret for the Job checkout initContainer.
 	secretName := fmt.Sprintf("agentjob-%s-github", aj.Name)
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: ns}}
@@ -595,6 +752,45 @@ echo "No .workspaces/agent.sh found; nothing to do."
 		// Cleanup best-effort so we don't strand jobs without checkout creds.
 		_ = s.k8s.Delete(ctx, aj)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "github_token_secret_failed"})
+		return
+	}
+
+	// Create a per-job broker token Secret (job identity) for agent-facing broker
+	// endpoints (NetworkGrant requests, PR creation, etc).
+	jobTokenTTL := 2 * time.Hour
+	if raw := strings.TrimSpace(getenv("AGENT_JOB_TOKEN_TTL_SECONDS", "7200")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			jobTokenTTL = time.Duration(n) * time.Second
+		}
+	}
+	jobToken, tErr := s.mintJobToken(ns, aj.Name, jobTokenTTL)
+	if tErr != nil {
+		_ = s.k8s.Delete(ctx, aj)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "job_token_mint_failed"})
+		return
+	}
+	brokerSecretName := fmt.Sprintf("agentjob-%s-broker", aj.Name)
+	brokerSecret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: brokerSecretName, Namespace: ns}}
+	_, bErr := controllerutil.CreateOrUpdate(ctx, s.k8s, brokerSecret, func() error {
+		if brokerSecret.Labels == nil {
+			brokerSecret.Labels = map[string]string{}
+		}
+		brokerSecret.Labels["workspaces.platform.dev/app"] = "agent"
+		brokerSecret.Labels["workspaces.platform.dev/agentjob"] = aj.Name
+		if brokerSecret.Annotations == nil {
+			brokerSecret.Annotations = map[string]string{}
+		}
+		brokerSecret.Annotations["workspaces.platform.dev/expires-at"] = time.Now().UTC().Add(jobTokenTTL).Format(time.RFC3339)
+		brokerSecret.Type = corev1.SecretTypeOpaque
+		if brokerSecret.Data == nil {
+			brokerSecret.Data = map[string][]byte{}
+		}
+		brokerSecret.Data["token"] = []byte(jobToken)
+		return controllerutil.SetControllerReference(aj, brokerSecret, s.scheme)
+	})
+	if bErr != nil {
+		_ = s.k8s.Delete(ctx, aj)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "job_token_secret_failed"})
 		return
 	}
 
@@ -628,24 +824,6 @@ func (s *server) requireAdmin(r *http.Request) error {
 	}
 	got := strings.TrimSpace(r.Header.Get("X-Broker-Admin-Token"))
 	if got == "" || got != s.adminToken {
-		return errors.New("invalid token")
-	}
-	return nil
-}
-
-func (s *server) requireAgent(r *http.Request) error {
-	// Admin token is a superset and may access agent endpoints too.
-	if s.adminToken != "" {
-		if strings.TrimSpace(r.Header.Get("X-Broker-Admin-Token")) == s.adminToken {
-			return nil
-		}
-	}
-
-	if s.agentToken == "" {
-		return errors.New("agent token not configured")
-	}
-	got := strings.TrimSpace(r.Header.Get("X-Broker-Agent-Token"))
-	if got == "" || got != s.agentToken {
 		return errors.New("invalid token")
 	}
 	return nil

@@ -143,8 +143,11 @@ Broker does:
 - `POST /v1/network-grants/{namespace}/{name}/approve` (admin approve)
 
 MVP auth:
-- agent-facing endpoints require `X-Broker-Agent-Token` (or admin token)
-- approval endpoints require `X-Broker-Admin-Token`
+- agent-facing endpoints require a **per-job token** minted by the broker (or admin token):
+  - `Authorization: Bearer <token>` or `X-Workspaces-Job-Token: <token>`
+  - jobs receive this as env `WORKSPACES_BROKER_JOB_TOKEN` (Secret: `agentjob-<name>-broker`)
+  - broker must be configured with `BROKER_JOB_JWT_SECRET` to mint/verify these tokens
+- approval endpoints require `X-Broker-Admin-Token` (or `X-Broker-Webhook-Token` for GitHub comment approvals / GitHub-triggered job creation)
 
 `POST /v1/github/open-pr` is implemented using a GitHub App installation token. To enable it, configure:
 - `capability-broker-github-app` Secret (keys: `app_id`, `installation_id`, `private-key.pem`)

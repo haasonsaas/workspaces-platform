@@ -27,9 +27,23 @@ type NetworkGrantEgressRule struct {
 	Ports []int32 `json:"ports,omitempty"`
 }
 
+type NetworkGrantAgentJobRef struct {
+	// Name is the AgentJob name this grant applies to.
+	// The grant must be created in the same namespace as the AgentJob.
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+}
+
 type NetworkGrantSpec struct {
+	// AgentJobRef selects the AgentJob this grant applies to.
+	// When set, the controller derives a stable pod selector based on the
+	// AgentJob name (labels: workspaces.platform.dev/app=agent and
+	// workspaces.platform.dev/agentjob=<name>).
+	AgentJobRef *NetworkGrantAgentJobRef `json:"agentJobRef,omitempty"`
+
 	// PodSelector selects the pods this grant applies to.
-	PodSelector metav1.LabelSelector `json:"podSelector"`
+	// Deprecated: prefer AgentJobRef for stable least-privilege binding.
+	PodSelector *metav1.LabelSelector `json:"podSelector,omitempty"`
 
 	// PolicyMode selects how egress rules are interpreted.
 	// MVP: STRICT_FQDN only.
