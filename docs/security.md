@@ -18,6 +18,10 @@ For agents (and ideally desktops over time):
 - `runAsNonRoot: true` (agents)
 - `automountServiceAccountToken: false` (agents)
 
+For control plane components (operator/broker/webhook/proxies where supported):
+- `runAsNonRoot: true`
+- `readOnlyRootFilesystem: true` (with explicit `/tmp` emptyDir mounts)
+
 ## Network Security
 
 Agents are **default-deny egress**.
