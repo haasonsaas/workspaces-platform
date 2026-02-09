@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: egress-proxy
+  namespace: workspaces-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: egress-proxy
+  template:
+    metadata:
+      labels:
+        app: egress-proxy
+        workspaces.platform.dev/app: proxy
+        workspaces.platform.dev/component: egress-proxy
+    spec:
+      serviceAccountName: egress-proxy
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: proxy
+          # TODO: publish/build this image.
+          image: ghcr.io/workspaces-platform/egress-proxy:latest
+          env:
+            - name: LISTEN_ADDR
+              value: ":8080"
+            - name: REFRESH_SECONDS
+              value: "5"
+            - name: DIAL_TIMEOUT_SECONDS
+              value: "10"
+            # Optional: audit config (see docs/audit.md).
+            - name: AUDIT_SINK
+              value: "stdout"
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: egress-proxy
+  namespace: workspaces-system
+spec:
+  selector:
+    app: egress-proxy
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+

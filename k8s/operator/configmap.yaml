@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: workspaces-operator-config
+  namespace: workspaces-system
+data:
+  # When set, the operator injects HTTP(S)_PROXY/ALL_PROXY into AgentJob pods
+  # for CONNECT-based, job-scoped egress.
+  agent_egress_proxy_url: "http://egress-proxy.workspaces-system.svc.cluster.local:8080"
+  agent_no_proxy: "localhost,127.0.0.1,.svc,.cluster.local"
+

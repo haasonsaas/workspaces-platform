@@ -44,6 +44,10 @@ This document describes the target architecture for ephemeral employee dev deskt
          Agent Job Pod (Kata RuntimeClass)
          (default-deny egress)
                 │
+                │ HTTP(S)_PROXY (CONNECT)
+                ▼
+           Egress Proxy
+                │
                 ▼
          Capability Broker
         ┌────────┼───────────────────────────┐
@@ -53,7 +57,7 @@ This document describes the target architecture for ephemeral employee dev deskt
       CRD          (GitHub App)        (short-lived creds)
         │
         ▼
- CiliumNetworkPolicy (FQDN egress, TTL)
+ CiliumNetworkPolicy (FQDN egress, TTL) OR proxy-enforced allowlist (PROXY_CONNECT)
 
  Optional GitHub approval loop:
    GitHub PR comment → github-webhook → broker approve → NetworkGrant
@@ -104,6 +108,7 @@ DNS hardening:
 Proxy-first guardrail:
 - The capability-broker rejects/blocks approving public internet `NetworkGrant`s by default unless the hostnames are explicitly allowlisted (`BROKER_NETWORK_*`).
 - This prevents “PR comment approves arbitrary internet” drift; admin approvals remain the explicit escape hatch.
+- For public egress, prefer `NetworkGrant.spec.policyMode=PROXY_CONNECT` so pods have no direct internet egress; egress is mediated by `egress-proxy` (see `docs/egress-proxy.md`).
 
 ## Core Control Plane Components
 

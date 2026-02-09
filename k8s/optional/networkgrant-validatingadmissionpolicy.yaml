@@ -1,0 +1,29 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: workspaces-networkgrant-broker-only
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: agents
+    resourceRules:
+      - apiGroups: ["workspaces.platform.dev"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["networkgrants"]
+  validations:
+    # Enforce the "broker is the choke point" model. Without this, anyone with
+    # Kubernetes write access to the agents namespace can bypass approval flows.
+    - expression: "request.userInfo.username == 'system:serviceaccount:workspaces-system:capability-broker' || request.userInfo.groups.exists(g, g == 'system:masters')"
+      message: "NetworkGrant create/update is restricted to the capability-broker (or cluster admins)"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: workspaces-networkgrant-broker-only
+spec:
+  policyName: workspaces-networkgrant-broker-only
+  validationActions: [Deny]
+

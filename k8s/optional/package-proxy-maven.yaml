@@ -1,0 +1,122 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: maven-proxy-cache
+  namespace: workspaces-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: longhorn
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: maven-proxy-nginx
+  namespace: workspaces-system
+data:
+  default.conf: |
+    proxy_cache_path /var/cache/nginx/maven levels=1:2 keys_zone=maven:20m max_size=20g inactive=90d use_temp_path=off;
+
+    server {
+      listen 8080;
+
+      location /maven2/ {
+        limit_except GET HEAD { deny all; }
+        proxy_ssl_server_name on;
+        proxy_pass https://repo1.maven.org/maven2/;
+        proxy_set_header Host repo1.maven.org;
+        proxy_cache maven;
+        proxy_cache_valid 200 301 302 30d;
+        proxy_cache_valid 404 10m;
+      }
+
+      location = /healthz {
+        return 200 "ok\n";
+      }
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: maven-proxy
+  namespace: workspaces-system
+  labels:
+    workspaces.platform.dev/app: proxy
+    workspaces.platform.dev/component: package-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: maven-proxy
+  template:
+    metadata:
+      labels:
+        app: maven-proxy
+        workspaces.platform.dev/app: proxy
+        workspaces.platform.dev/component: package-proxy
+    spec:
+      securityContext:
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: nginx
+          image: nginxinc/nginx-unprivileged:stable-alpine
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 101
+            runAsGroup: 101
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: cache
+              mountPath: /var/cache/nginx
+            - name: config
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: maven-proxy-cache
+        - name: config
+          configMap:
+            name: maven-proxy-nginx
+        - name: tmp
+          emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: maven-proxy
+  namespace: workspaces-system
+spec:
+  selector:
+    app: maven-proxy
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+

@@ -9,6 +9,12 @@ type NetworkGrantPolicyMode string
 const (
 	// NetworkGrantPolicyModeStrictFQDN allows exact FQDN egress rules via Cilium toFQDNs.matchName.
 	NetworkGrantPolicyModeStrictFQDN NetworkGrantPolicyMode = "STRICT_FQDN"
+
+	// NetworkGrantPolicyModeProxyConnect enforces egress via an in-cluster HTTP CONNECT
+	// proxy (egress-proxy). In this mode, the controller does not create direct
+	// pod-to-internet egress policy; the proxy authorizes CONNECT destinations
+	// using the approved NetworkGrant spec.
+	NetworkGrantPolicyModeProxyConnect NetworkGrantPolicyMode = "PROXY_CONNECT"
 )
 
 type NetworkGrantProtocol string
@@ -46,8 +52,10 @@ type NetworkGrantSpec struct {
 	PodSelector *metav1.LabelSelector `json:"podSelector,omitempty"`
 
 	// PolicyMode selects how egress rules are interpreted.
-	// MVP: STRICT_FQDN only.
-	// +kubebuilder:validation:Enum=STRICT_FQDN
+	// Modes:
+	// - STRICT_FQDN: controller enforces direct egress using Cilium toFQDNs.
+	// - PROXY_CONNECT: egress is enforced via an in-cluster HTTP CONNECT proxy.
+	// +kubebuilder:validation:Enum=STRICT_FQDN;PROXY_CONNECT
 	PolicyMode NetworkGrantPolicyMode `json:"policyMode,omitempty"`
 
 	// Protocol is currently TCP only.

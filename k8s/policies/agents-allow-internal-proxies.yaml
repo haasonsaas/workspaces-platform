@@ -17,6 +17,10 @@ spec:
             k8s:io.kubernetes.pod.namespace: workspaces-system
             workspaces.platform.dev/app: proxy
             workspaces.platform.dev/component: package-proxy
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: workspaces-system
+            workspaces.platform.dev/app: proxy
+            workspaces.platform.dev/component: egress-proxy
       toPorts:
         - ports:
             - port: "443"

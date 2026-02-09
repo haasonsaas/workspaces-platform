@@ -22,6 +22,15 @@ type AgentJobReconciler struct {
 	Scheme *runtime.Scheme
 
 	DefaultAgentRuntimeClass string
+
+	// AgentEgressProxyURL, when set, is injected as HTTP(S)_PROXY/ALL_PROXY into
+	// AgentJob pods so approved egress can be mediated through an in-cluster
+	// CONNECT proxy.
+	AgentEgressProxyURL string
+
+	// AgentNoProxy is injected as NO_PROXY (and lowercase variants) when
+	// AgentEgressProxyURL is set. If empty, a reasonable default is used.
+	AgentNoProxy string
 }
 
 func (r *AgentJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -69,6 +78,29 @@ func (r *AgentJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		job.Spec.Template.ObjectMeta.Labels = labels
 
 		workspaceEnv := append([]corev1.EnvVar{{Name: "WORKSPACE", Value: "/workspace"}}, aj.Spec.Env...)
+
+		// Optional: inject a cluster egress proxy for CONNECT-based, job-scoped
+		// internet access. This keeps baseline pod egress strict (agent can only
+		// reach in-cluster proxies) while still allowing approved external access.
+		proxyURL := strings.TrimSpace(r.AgentEgressProxyURL)
+		if proxyURL != "" {
+			noProxy := strings.TrimSpace(r.AgentNoProxy)
+			if noProxy == "" {
+				noProxy = "localhost,127.0.0.1,.svc,.cluster.local"
+			}
+			proxyEnv := []corev1.EnvVar{
+				{Name: "HTTP_PROXY", Value: proxyURL},
+				{Name: "HTTPS_PROXY", Value: proxyURL},
+				{Name: "ALL_PROXY", Value: proxyURL},
+				{Name: "NO_PROXY", Value: noProxy},
+				// Some tools only respect lowercase env vars.
+				{Name: "http_proxy", Value: proxyURL},
+				{Name: "https_proxy", Value: proxyURL},
+				{Name: "all_proxy", Value: proxyURL},
+				{Name: "no_proxy", Value: noProxy},
+			}
+			workspaceEnv = upsertEnv(workspaceEnv, proxyEnv)
+		}
 
 		pod := corev1.PodSpec{
 			RestartPolicy:                corev1.RestartPolicyNever,
@@ -345,6 +377,28 @@ func sameInt32Ptr(a, b *int32) bool {
 		return false
 	}
 	return *a == *b
+}
+
+func upsertEnv(env []corev1.EnvVar, add []corev1.EnvVar) []corev1.EnvVar {
+	if len(add) == 0 {
+		return env
+	}
+	index := map[string]int{}
+	for i := range env {
+		index[env[i].Name] = i
+	}
+	for _, v := range add {
+		if v.Name == "" {
+			continue
+		}
+		if i, ok := index[v.Name]; ok {
+			env[i] = v
+			continue
+		}
+		env = append(env, v)
+		index[v.Name] = len(env) - 1
+	}
+	return env
 }
 
 func (r *AgentJobReconciler) SetupWithManager(mgr ctrl.Manager) error {

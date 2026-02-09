@@ -213,11 +213,26 @@ func (s *server) handleCreateNetworkGrant(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "egress_required"})
 		return
 	}
-	if req.PolicyMode == "" {
-		req.PolicyMode = workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN
-	}
 	if req.Protocol == "" {
 		req.Protocol = workspacesv1alpha1.NetworkGrantProtocolTCP
+	}
+
+	if req.PolicyMode == "" {
+		// Default policy mode based on destination type for non-admin callers:
+		// - internal => STRICT_FQDN (direct in-cluster)
+		// - public  => PROXY_CONNECT (proxy-first)
+		publicRequested := false
+		for _, er := range req.Egress {
+			if !s.netPolicy.hostIsInternal(er.Host) {
+				publicRequested = true
+				break
+			}
+		}
+		if !s.isAdmin(r) && publicRequested {
+			req.PolicyMode = workspacesv1alpha1.NetworkGrantPolicyModeProxyConnect
+		} else {
+			req.PolicyMode = workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN
+		}
 	}
 
 	// Proxy-first guardrail: non-admin callers may only request egress to internal
@@ -711,7 +726,7 @@ echo "No .workspaces/agent.sh found; nothing to do."
 			},
 			Spec: workspacesv1alpha1.NetworkGrantSpec{
 				AgentJobRef: &workspacesv1alpha1.NetworkGrantAgentJobRef{Name: jobName},
-				PolicyMode:  workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN,
+				PolicyMode:  workspacesv1alpha1.NetworkGrantPolicyModeProxyConnect,
 				Protocol:    workspacesv1alpha1.NetworkGrantProtocolTCP,
 				Purpose:     "repo checkout + GitHub API",
 				Egress: []workspacesv1alpha1.NetworkGrantEgressRule{

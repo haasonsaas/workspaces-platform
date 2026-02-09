@@ -31,6 +31,8 @@ func main() {
 	var leaderElectionID string
 	var defaultDesktopImage string
 	var defaultAgentRuntimeClass string
+	var agentEgressProxyURL string
+	var agentNoProxy string
 	var maxGrantTTLSeconds int
 	var maxGrantEgressRules int
 	var maxGrantDNSNames int
@@ -41,6 +43,8 @@ func main() {
 	flag.StringVar(&leaderElectionID, "leader-election-id", "workspaces-operator.workspaces.platform.dev", "Leader election ID.")
 	flag.StringVar(&defaultDesktopImage, "default-desktop-image", getenv("DEFAULT_DESKTOP_IMAGE", "ghcr.io/workspaces-platform/desktop:latest"), "Default desktop image if Desktop.spec.image is empty.")
 	flag.StringVar(&defaultAgentRuntimeClass, "default-agent-runtimeclass", getenv("DEFAULT_AGENT_RUNTIMECLASS", "kata"), "Default RuntimeClassName for AgentJobs.")
+	flag.StringVar(&agentEgressProxyURL, "agent-egress-proxy-url", getenv("AGENT_EGRESS_PROXY_URL", ""), "HTTP proxy URL injected into AgentJob pods as HTTP(S)_PROXY/ALL_PROXY (optional).")
+	flag.StringVar(&agentNoProxy, "agent-no-proxy", getenv("AGENT_NO_PROXY", ""), "NO_PROXY injected into AgentJob pods when agent egress proxy is set (optional).")
 	flag.IntVar(&maxGrantTTLSeconds, "networkgrant-max-ttl-seconds", intFromEnv("NETWORKGRANT_MAX_TTL_SECONDS", 7200), "Max ttlSeconds allowed for NetworkGrants (0 disables cap).")
 	flag.IntVar(&maxGrantEgressRules, "networkgrant-max-egress-rules", intFromEnv("NETWORKGRANT_MAX_EGRESS_RULES", 20), "Max number of egress destinations allowed for NetworkGrants (0 disables cap).")
 	flag.IntVar(&maxGrantDNSNames, "networkgrant-max-dns-names", intFromEnv("NETWORKGRANT_MAX_DNS_NAMES", 50), "Max number of unique DNS names allowed for NetworkGrant DNS allow rules (0 disables cap).")
@@ -87,6 +91,8 @@ func main() {
 		Client:                   mgr.GetClient(),
 		Scheme:                   mgr.GetScheme(),
 		DefaultAgentRuntimeClass: defaultAgentRuntimeClass,
+		AgentEgressProxyURL:      agentEgressProxyURL,
+		AgentNoProxy:             agentNoProxy,
 	}).SetupWithManager(mgr); err != nil {
 		ctrl.Log.Error(err, "unable to create controller", "controller", "AgentJob")
 		os.Exit(1)

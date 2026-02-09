@@ -386,6 +386,7 @@ func cmdNetgrant(args []string) {
 			namespace   = fs.String("namespace", "agents", "Namespace")
 			agentJob    = fs.String("agentjob", "", "AgentJob name the grant applies to")
 			purpose     = fs.String("purpose", "", "Purpose (required)")
+			policyMode  = fs.String("policy-mode", "STRICT_FQDN", "PolicyMode (STRICT_FQDN or PROXY_CONNECT)")
 			ttl         = fs.Int("ttl", 1800, "TTL seconds")
 			allowNon443 = fs.Bool("allow-non-443", false, "Allow non-443 ports")
 			egress      multiFlag
@@ -420,7 +421,7 @@ func cmdNetgrant(args []string) {
 		payload := map[string]any{
 			"namespace":   strings.TrimSpace(*namespace),
 			"agentJob":    strings.TrimSpace(*agentJob),
-			"policyMode":  "STRICT_FQDN",
+			"policyMode":  strings.TrimSpace(*policyMode),
 			"protocol":    "TCP",
 			"purpose":     strings.TrimSpace(*purpose),
 			"egress":      rules,

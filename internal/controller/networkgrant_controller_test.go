@@ -59,6 +59,14 @@ func TestValidateAndResolveNetworkGrantMatchLabels_CapsAndValidation(t *testing.
 		}
 	})
 
+	t.Run("ok_proxy_connect", func(t *testing.T) {
+		g := base()
+		g.Spec.PolicyMode = workspacesv1alpha1.NetworkGrantPolicyModeProxyConnect
+		if _, _, err := validateAndResolveNetworkGrantMatchLabels(&g, 7200, 20, 50); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
 	t.Run("ttl_exceeds_cap", func(t *testing.T) {
 		g := base()
 		g.Spec.TTLSeconds = 9001

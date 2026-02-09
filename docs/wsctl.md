@@ -74,6 +74,9 @@ wsctl netgrant request \
   --egress github.com:443 \
   --egress api.github.com:443
 
+# Proxy-first mode (recommended for public egress when using egress-proxy):
+# wsctl netgrant request ... --policy-mode PROXY_CONNECT
+
 # Optional: allow DNS resolution for additional names (e.g. CNAME targets) without granting direct egress.
 # wsctl netgrant request ... --dns-allow github.map.fastly.net
 ```

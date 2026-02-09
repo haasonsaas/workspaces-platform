@@ -18,6 +18,19 @@ spec:
         - name: operator
           # TODO: publish/build this image.
           image: ghcr.io/workspaces-platform/workspaces-operator:latest
+          env:
+            - name: AGENT_EGRESS_PROXY_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: workspaces-operator-config
+                  key: agent_egress_proxy_url
+                  optional: true
+            - name: AGENT_NO_PROXY
+              valueFrom:
+                configMapKeyRef:
+                  name: workspaces-operator-config
+                  key: agent_no_proxy
+                  optional: true
           args:
             - "--leader-elect=true"
             - "--metrics-bind-address=:8080"

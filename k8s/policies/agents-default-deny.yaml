@@ -50,5 +50,5 @@ spec:
               protocol: TCP
     # MVP: do NOT allow broad public internet by default. Prefer internal
     # package proxies/mirrors; everything else is unlocked per-job via
-    # NetworkGrant (STRICT_FQDN + 443-only by default).
+    # NetworkGrant (proxy-first via PROXY_CONNECT; STRICT_FQDN is an admin escape hatch).
   ingress: []

@@ -69,7 +69,7 @@ func TestNetworkGrantPolicy_ValidateNonAdminNetworkGrant(t *testing.T) {
 
 	t.Run("denies public host not allowlisted", func(t *testing.T) {
 		spec := workspacesv1alpha1.NetworkGrantSpec{
-			PolicyMode: workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN,
+			PolicyMode: workspacesv1alpha1.NetworkGrantPolicyModeProxyConnect,
 			Protocol:   workspacesv1alpha1.NetworkGrantProtocolTCP,
 			Egress: []workspacesv1alpha1.NetworkGrantEgressRule{
 				{Host: "crates.io", Ports: []int32{443}},
@@ -82,7 +82,7 @@ func TestNetworkGrantPolicy_ValidateNonAdminNetworkGrant(t *testing.T) {
 
 	t.Run("allows public host allowlisted", func(t *testing.T) {
 		spec := workspacesv1alpha1.NetworkGrantSpec{
-			PolicyMode: workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN,
+			PolicyMode: workspacesv1alpha1.NetworkGrantPolicyModeProxyConnect,
 			Protocol:   workspacesv1alpha1.NetworkGrantProtocolTCP,
 			Egress: []workspacesv1alpha1.NetworkGrantEgressRule{
 				{Host: "github.com", Ports: []int32{443}},
@@ -95,7 +95,7 @@ func TestNetworkGrantPolicy_ValidateNonAdminNetworkGrant(t *testing.T) {
 
 	t.Run("denies public dnsAllow not allowlisted", func(t *testing.T) {
 		spec := workspacesv1alpha1.NetworkGrantSpec{
-			PolicyMode: workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN,
+			PolicyMode: workspacesv1alpha1.NetworkGrantPolicyModeProxyConnect,
 			Protocol:   workspacesv1alpha1.NetworkGrantProtocolTCP,
 			Egress: []workspacesv1alpha1.NetworkGrantEgressRule{
 				{Host: "github.com", Ports: []int32{443}},
@@ -109,7 +109,7 @@ func TestNetworkGrantPolicy_ValidateNonAdminNetworkGrant(t *testing.T) {
 
 	t.Run("allows public dnsAllow allowlisted", func(t *testing.T) {
 		spec := workspacesv1alpha1.NetworkGrantSpec{
-			PolicyMode: workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN,
+			PolicyMode: workspacesv1alpha1.NetworkGrantPolicyModeProxyConnect,
 			Protocol:   workspacesv1alpha1.NetworkGrantProtocolTCP,
 			Egress: []workspacesv1alpha1.NetworkGrantEgressRule{
 				{Host: "github.com", Ports: []int32{443}},
@@ -118,6 +118,32 @@ func TestNetworkGrantPolicy_ValidateNonAdminNetworkGrant(t *testing.T) {
 		}
 		if err := p.validateNonAdminNetworkGrant(spec); err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("denies public host in STRICT_FQDN", func(t *testing.T) {
+		spec := workspacesv1alpha1.NetworkGrantSpec{
+			PolicyMode: workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN,
+			Protocol:   workspacesv1alpha1.NetworkGrantProtocolTCP,
+			Egress: []workspacesv1alpha1.NetworkGrantEgressRule{
+				{Host: "github.com", Ports: []int32{443}},
+			},
+		}
+		if err := p.validateNonAdminNetworkGrant(spec); err == nil {
+			t.Fatalf("expected error")
+		}
+	})
+
+	t.Run("denies internal host in PROXY_CONNECT", func(t *testing.T) {
+		spec := workspacesv1alpha1.NetworkGrantSpec{
+			PolicyMode: workspacesv1alpha1.NetworkGrantPolicyModeProxyConnect,
+			Protocol:   workspacesv1alpha1.NetworkGrantProtocolTCP,
+			Egress: []workspacesv1alpha1.NetworkGrantEgressRule{
+				{Host: "capability-broker.workspaces-system.svc.cluster.local", Ports: []int32{443}},
+			},
+		}
+		if err := p.validateNonAdminNetworkGrant(spec); err == nil {
+			t.Fatalf("expected error")
 		}
 	})
 }

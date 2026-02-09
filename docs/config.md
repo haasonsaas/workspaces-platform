@@ -9,6 +9,8 @@ Binary: `cmd/workspaces-operator`
 Flags:
 - `--default-desktop-image` (env: `DEFAULT_DESKTOP_IMAGE`): image used when `Desktop.spec.image` is empty.
 - `--default-agent-runtimeclass` (env: `DEFAULT_AGENT_RUNTIMECLASS`): RuntimeClass used when `AgentJob.spec.runtimeClassName` is empty.
+- `--agent-egress-proxy-url` (env: `AGENT_EGRESS_PROXY_URL`): when set, injects `HTTP(S)_PROXY`/`ALL_PROXY` into AgentJob pods (CONNECT proxy mode).
+- `--agent-no-proxy` (env: `AGENT_NO_PROXY`): `NO_PROXY` value injected into AgentJob pods when `AGENT_EGRESS_PROXY_URL` is set.
 - `--networkgrant-max-ttl-seconds` (env: `NETWORKGRANT_MAX_TTL_SECONDS`): max `NetworkGrant.spec.ttlSeconds` allowed (0 disables cap). Default `7200`.
 - `--networkgrant-max-egress-rules` (env: `NETWORKGRANT_MAX_EGRESS_RULES`): max `NetworkGrant.spec.egress` rules allowed (0 disables cap). Default `20`.
 - `--networkgrant-max-dns-names` (env: `NETWORKGRANT_MAX_DNS_NAMES`): max unique DNS names allowed for DNS L7 allow rules (union of `spec.egress.host` and `spec.dnsAllow`). Default `50`.
@@ -100,6 +102,18 @@ Policy:
 Broker integration:
 - `BROKER_BASE_URL` (required)
 - `BROKER_WEBHOOK_TOKEN` (preferred) or `BROKER_ADMIN_TOKEN` (fallback)
+
+## egress-proxy
+
+Binary: `cmd/egress-proxy`
+
+Core:
+- `LISTEN_ADDR` (default `:8080`)
+- `REFRESH_SECONDS` (default `5`): how often to refresh pod/grant caches.
+- `DIAL_TIMEOUT_SECONDS` (default `10`)
+
+Audit:
+- uses the same `AUDIT_*` env vars as other components (`internal/audit`)
 
 ## ws-proxy
 

@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pypi-proxy-storage
+  namespace: workspaces-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: longhorn
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pypi-proxy
+  namespace: workspaces-system
+  labels:
+    workspaces.platform.dev/app: proxy
+    workspaces.platform.dev/component: package-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pypi-proxy
+  template:
+    metadata:
+      labels:
+        app: pypi-proxy
+        workspaces.platform.dev/app: proxy
+        workspaces.platform.dev/component: package-proxy
+    spec:
+      containers:
+        - name: devpi
+          # Pin by digest in production (see docs/reproducibility.md).
+          image: devpi/devpi:latest
+          args:
+            - devpi-server
+            - "--serverdir"
+            - /data
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "8080"
+          ports:
+            - name: http
+              containerPort: 8080
+          volumeMounts:
+            - name: storage
+              mountPath: /data
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: pypi-proxy-storage
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pypi-proxy
+  namespace: workspaces-system
+spec:
+  selector:
+    app: pypi-proxy
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+

@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: registry-proxy-storage
+  namespace: workspaces-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: longhorn
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: registry-proxy-config
+  namespace: workspaces-system
+data:
+  config.yml: |
+    version: 0.1
+    log:
+      fields:
+        service: registry
+    storage:
+      filesystem:
+        rootdirectory: /var/lib/registry
+    http:
+      addr: :8080
+      headers:
+        X-Content-Type-Options: [nosniff]
+    proxy:
+      remoteurl: https://registry-1.docker.io
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registry-proxy
+  namespace: workspaces-system
+  labels:
+    workspaces.platform.dev/app: proxy
+    workspaces.platform.dev/component: package-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: registry-proxy
+  template:
+    metadata:
+      labels:
+        app: registry-proxy
+        workspaces.platform.dev/app: proxy
+        workspaces.platform.dev/component: package-proxy
+    spec:
+      containers:
+        - name: registry
+          image: registry:2
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: REGISTRY_CONFIGURATION_PATH
+              value: /etc/docker/registry/config.yml
+          volumeMounts:
+            - name: storage
+              mountPath: /var/lib/registry
+            - name: config
+              mountPath: /etc/docker/registry/config.yml
+              subPath: config.yml
+              readOnly: true
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: registry-proxy-storage
+        - name: config
+          configMap:
+            name: registry-proxy-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry-proxy
+  namespace: workspaces-system
+spec:
+  selector:
+    app: registry-proxy
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+

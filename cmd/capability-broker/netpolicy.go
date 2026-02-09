@@ -136,15 +136,13 @@ func (p networkGrantPolicy) publicDNSAllowed(host string) bool {
 // validateNonAdminNetworkGrant enforces a strict, proxy-first policy for callers
 // that are not using the broker admin token.
 func (p networkGrantPolicy) validateNonAdminNetworkGrant(spec workspacesv1alpha1.NetworkGrantSpec) error {
-	// Keep the "least privilege" shape stable for non-admin usage: 443-only and
-	// STRICT_FQDN+TCP only.
+	// Keep the "least privilege" shape stable for non-admin usage:
+	// - 443-only
+	// - TCP only
+	// - internal destinations via STRICT_FQDN
+	// - public destinations (if allowlisted) via PROXY_CONNECT (proxy-first)
 	mode := spec.PolicyMode
-	if mode == "" {
-		mode = workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN
-	}
-	if mode != workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN {
-		return fmt.Errorf("policyMode %q not allowed for non-admin", mode)
-	}
+
 	proto := spec.Protocol
 	if proto == "" {
 		proto = workspacesv1alpha1.NetworkGrantProtocolTCP
@@ -157,6 +155,7 @@ func (p networkGrantPolicy) validateNonAdminNetworkGrant(spec workspacesv1alpha1
 		return fmt.Errorf("allowNon443 not allowed for non-admin")
 	}
 
+	publicRequested := false
 	egressHosts := map[string]struct{}{}
 	for i, r := range spec.Egress {
 		h := strings.ToLower(strings.TrimSpace(r.Host))
@@ -178,10 +177,27 @@ func (p networkGrantPolicy) validateNonAdminNetworkGrant(spec workspacesv1alpha1
 		if p.hostIsInternal(h) {
 			continue
 		}
+		publicRequested = true
 		if p.publicHostAllowed(h) {
 			continue
 		}
 		return fmt.Errorf("public egress host %q is not allowed (proxy-first; use internal mirrors or admin override)", h)
+	}
+
+	if publicRequested {
+		if mode == "" {
+			mode = workspacesv1alpha1.NetworkGrantPolicyModeProxyConnect
+		}
+		if mode != workspacesv1alpha1.NetworkGrantPolicyModeProxyConnect {
+			return fmt.Errorf("policyMode %q not allowed for public egress (non-admin requires PROXY_CONNECT)", mode)
+		}
+	} else {
+		if mode == "" {
+			mode = workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN
+		}
+		if mode != workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN {
+			return fmt.Errorf("policyMode %q not allowed for internal egress (non-admin requires STRICT_FQDN)", mode)
+		}
 	}
 
 	for i, host := range spec.DNSAllow {

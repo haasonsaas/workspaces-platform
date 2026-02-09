@@ -146,9 +146,12 @@ spec:
               policyMode:
                 description: |-
                   PolicyMode selects how egress rules are interpreted.
-                  MVP: STRICT_FQDN only.
+                  Modes:
+                  - STRICT_FQDN: controller enforces direct egress using Cilium toFQDNs.
+                  - PROXY_CONNECT: egress is enforced via an in-cluster HTTP CONNECT proxy.
                 enum:
                 - STRICT_FQDN
+                - PROXY_CONNECT
                 type: string
               protocol:
                 description: Protocol is currently TCP only.

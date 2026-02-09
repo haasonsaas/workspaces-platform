@@ -45,9 +45,10 @@ kubectl apply -f k8s/policies/agents-default-deny.yaml
 Then add allowlists for:
 - DNS (already included)
 - `capability-broker` service
+- `egress-proxy` (in-cluster HTTP CONNECT proxy; enables proxy-first internet egress)
 - MinIO
 - package proxies / registries
-- GitHub (or internal git mirror), ideally via proxies and/or scoped `NetworkGrant`s
+- GitHub (or internal git mirror), ideally via proxy-first `NetworkGrant`s (see `docs/egress-proxy.md`)
 
 ## 4. Create A Desktop
 
@@ -101,7 +102,9 @@ For PR-scoped agent runs (via `/agent run`), add a repo-local `.workspaces/agent
 ## 6. Network Unlocks (Approval)
 
 `NetworkGrant` is the primitive for "unlock this destination for this job for N minutes".
-The operator translates it to a `CiliumNetworkPolicy` named `netgrant-<grant>`.
+Enforcement depends on `spec.policyMode`:
+- `STRICT_FQDN`: operator translates it to a `CiliumNetworkPolicy` named `netgrant-<grant>`.
+- `PROXY_CONNECT`: no direct egress policy is created; `egress-proxy` enforces the CONNECT allowlist.
 
 MVP schema constraints (enforced by controller):
 - exact FQDN only (no wildcards)

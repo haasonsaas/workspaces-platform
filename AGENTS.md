@@ -80,7 +80,7 @@ Primitive for approvals:
 - translates to `CiliumNetworkPolicy`
 
 MVP constraints (enforced by controller):
-- `policyMode`: `STRICT_FQDN` only
+- `policyMode`: `STRICT_FQDN` (direct Cilium FQDN) or `PROXY_CONNECT` (proxy-enforced allowlist)
 - `protocol`: `TCP` only
 - `purpose` is required
 - non-443 ports require `allowNon443: true`
@@ -132,7 +132,7 @@ Pattern:
 1. baseline policy allows DNS + broker (and ideally only your internal proxies).
 2. agent requests additional destination via broker.
 3. approver grants `NetworkGrant` scoped to job labels + TTL.
-4. controller enforces via Cilium FQDN egress policy and revokes on expiry.
+4. controller enforces via Cilium FQDN egress policy (STRICT_FQDN) or the egress-proxy enforces CONNECT allowlists (PROXY_CONNECT).
 
 Broker guardrail:
 - By default, GitHub comment approvals (webhook token) cannot approve public internet egress unless the hostnames are explicitly allowlisted (`BROKER_NETWORK_*`).

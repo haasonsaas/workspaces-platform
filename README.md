@@ -10,6 +10,7 @@ MVP locks:
 
 Repo layout:
 - `cmd/workspaces-operator`: reconciles CRDs into Kubernetes workloads.
+- `cmd/egress-proxy`: HTTP CONNECT proxy that enforces `NetworkGrant` allowlists (proxy-first egress).
 - `api/v1alpha1`: CRD Go types (Desktop, AgentJob, NetworkGrant).
 - `k8s/`: CRDs + example manifests (Cilium policies, operator deploy).
 
@@ -24,6 +25,7 @@ Docs:
 - `docs/storage.md`
 - `docs/config.md`
 - `docs/reproducibility.md`
+- `docs/egress-proxy.md`
 - `docs/wsctl.md`
 
 This repo is an MVP that compiles and deploys manifests, but you still need to wire:

@@ -4,7 +4,10 @@ metadata:
   name: example-github
   namespace: agents
 spec:
-  policyMode: STRICT_FQDN
+  # Enforcement:
+  # - STRICT_FQDN: controller creates a CiliumNetworkPolicy allowing direct egress.
+  # - PROXY_CONNECT: egress-proxy enforces the CONNECT allowlist (proxy-first).
+  policyMode: PROXY_CONNECT
   protocol: TCP
   approved: true
   approvedBy: admin

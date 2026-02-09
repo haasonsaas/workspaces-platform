@@ -124,6 +124,23 @@ func (r *NetworkGrantReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
+	mode := grant.Spec.PolicyMode
+	if mode == "" {
+		mode = workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN
+	}
+
+	// PROXY_CONNECT mode: do not create direct egress policy. The egress-proxy
+	// enforces the destination allowlist using this NetworkGrant.
+	if mode == workspacesv1alpha1.NetworkGrantPolicyModeProxyConnect {
+		_ = r.Delete(ctx, cnp) // clean up any previous STRICT_FQDN policy
+		if !grant.Status.Active {
+			patch := client.MergeFrom(grant.DeepCopy())
+			grant.Status.Active = true
+			_ = r.Status().Patch(ctx, &grant, patch)
+		}
+		return ctrl.Result{RequeueAfter: time.Until(expiresAt)}, nil
+	}
+
 	spec := map[string]any{
 		"endpointSelector": map[string]any{
 			"matchLabels": matchLabels,
@@ -210,8 +227,10 @@ func validateAndResolveNetworkGrantMatchLabels(grant *workspacesv1alpha1.Network
 	if mode == "" {
 		mode = workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN
 	}
-	if mode != workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN {
-		return nil, nil, fmt.Errorf("policyMode %q is not supported (MVP supports STRICT_FQDN only)", mode)
+	switch mode {
+	case workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN, workspacesv1alpha1.NetworkGrantPolicyModeProxyConnect:
+	default:
+		return nil, nil, fmt.Errorf("policyMode %q is not supported", mode)
 	}
 
 	proto := grant.Spec.Protocol

@@ -9,5 +9,6 @@ resources:
   - namespaces/agents.yaml
   - operator
   - broker
+  - egress-proxy
   - policies/agents-default-deny.yaml
   - policies/agents-allow-internal-proxies.yaml

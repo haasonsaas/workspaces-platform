@@ -61,6 +61,9 @@ Optional example manifests:
 - `k8s/optional/package-proxy-verdaccio.yaml` (npm proxy/cache)
 - `k8s/optional/package-proxy-athens.yaml` (Go module proxy)
 - `k8s/optional/package-proxy-cargo.yaml` (Cargo sparse index + crate download proxy/cache)
+- `k8s/optional/package-proxy-devpi.yaml` (PyPI proxy/mirror via devpi)
+- `k8s/optional/package-proxy-maven.yaml` (Maven Central proxy/cache)
+- `k8s/optional/package-proxy-registry.yaml` (Docker Hub pull-through registry cache)
 
 Example client config:
 - npm:
@@ -70,6 +73,12 @@ Example client config:
 - Cargo (sparse):
   - `export CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse`
   - `export CARGO_REGISTRIES_CRATES_IO_INDEX=sparse+http://cargo-proxy.workspaces-system.svc.cluster.local:8080/index/`
+- pip (devpi):
+  - `pip config set global.index-url http://pypi-proxy.workspaces-system.svc.cluster.local:8080/root/pypi/+simple/`
+- Maven (settings.xml mirror):
+  - `<url>http://maven-proxy.workspaces-system.svc.cluster.local:8080/maven2</url>`
+- Docker (daemon registry mirror):
+  - `{"registry-mirrors": ["http://registry-proxy.workspaces-system.svc.cluster.local:8080"]}`
 
 ## 5) Tighten DNS (Prevent “Free Exfil”)
 
