@@ -36,6 +36,8 @@ type DesktopReconciler struct {
 	DefaultDesktopImage string
 }
 
+const annotationLastActiveAt = "workspaces.platform.dev/last-active-at"
+
 func (r *DesktopReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var desk workspacesv1alpha1.Desktop
 	if err := r.Get(ctx, req.NamespacedName, &desk); err != nil {
@@ -48,6 +50,38 @@ func (r *DesktopReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if desk.Spec.User == "" {
 		// Don't create anything if user isn't set; surface in status.
 		return ctrl.Result{}, nil
+	}
+
+	now := time.Now().UTC()
+
+	// Best-effort: copy last-active annotation into status for autosuspend/UX.
+	var lastActive *metav1.Time
+	if desk.Annotations != nil {
+		if raw := strings.TrimSpace(desk.Annotations[annotationLastActiveAt]); raw != "" {
+			if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+				v := metav1.NewTime(t)
+				lastActive = &v
+			} else if t, err := time.Parse(time.RFC3339, raw); err == nil {
+				v := metav1.NewTime(t)
+				lastActive = &v
+			}
+		}
+	}
+	if !sameTimePtr(desk.Status.LastActiveAt, lastActive) {
+		patch := client.MergeFrom(desk.DeepCopy())
+		desk.Status.LastActiveAt = lastActive
+		_ = r.Status().Patch(ctx, &desk, patch)
+	}
+
+	shouldSuspend := desk.Spec.Suspended
+	if !shouldSuspend && desk.Spec.IdleTimeoutSeconds > 0 && lastActive != nil {
+		if now.Sub(lastActive.Time) >= time.Duration(desk.Spec.IdleTimeoutSeconds)*time.Second {
+			shouldSuspend = true
+		}
+	}
+	replicas := int32(1)
+	if shouldSuspend {
+		replicas = 0
 	}
 
 	labels := map[string]string{
@@ -164,7 +198,7 @@ func (r *DesktopReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			deploy.Labels[k] = v
 		}
 
-		deploy.Spec.Replicas = ptrTo(int32(1))
+		deploy.Spec.Replicas = ptrTo(replicas)
 		deploy.Spec.Strategy = appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
 		deploy.Spec.Selector = &metav1.LabelSelector{MatchLabels: labels}
 		deploy.Spec.Template.ObjectMeta.Labels = labels
@@ -241,12 +275,15 @@ func (r *DesktopReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	var latest appsv1.Deployment
 	if err := r.Get(ctx, types.NamespacedName{Name: deployName, Namespace: desk.Namespace}, &latest); err == nil {
 		phase := "Pending"
-		if latest.Status.AvailableReplicas > 0 {
+		if shouldSuspend {
+			phase = "Suspended"
+		} else if latest.Status.AvailableReplicas > 0 {
 			phase = "Running"
 		}
-		if desk.Status.Phase != phase || desk.Status.ServiceName != svcName {
+		if desk.Status.Phase != phase || desk.Status.ServiceName != svcName || desk.Status.Suspended != shouldSuspend {
 			patch := client.MergeFrom(desk.DeepCopy())
 			desk.Status.Phase = phase
+			desk.Status.Suspended = shouldSuspend
 			desk.Status.ServiceName = svcName
 			_ = r.Status().Patch(ctx, &desk, patch)
 		}
@@ -259,6 +296,14 @@ func (r *DesktopReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			retain = 1
 		}
 		_ = r.enforceHomeRetention(ctx, &desk, labels, activeHomePVCName, int(retain))
+	}
+
+	// Autosuspend boundary requeue.
+	if !shouldSuspend && desk.Spec.IdleTimeoutSeconds > 0 && desk.Status.LastActiveAt != nil {
+		deadline := desk.Status.LastActiveAt.Time.Add(time.Duration(desk.Spec.IdleTimeoutSeconds) * time.Second)
+		if dur := deadline.Sub(now); dur > 0 {
+			return ctrl.Result{RequeueAfter: dur}, nil
+		}
 	}
 
 	return ctrl.Result{}, nil

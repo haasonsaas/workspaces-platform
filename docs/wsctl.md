@@ -14,12 +14,23 @@ Create:
 wsctl desktop create \
   --name jonathan \
   --user jonathan \
-  --ssh-key-file ~/.ssh/id_ed25519.pub
+  --ssh-key-file ~/.ssh/id_ed25519.pub \
+  --idle-timeout 3600
 ```
 
 List:
 ```bash
 wsctl desktop list
+```
+
+Suspend:
+```bash
+wsctl desktop suspend --name jonathan
+```
+
+Resume:
+```bash
+wsctl desktop resume --name jonathan
 ```
 
 ## AgentJob

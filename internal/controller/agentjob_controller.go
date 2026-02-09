@@ -337,16 +337,6 @@ func copyTimePtr(t *metav1.Time) *metav1.Time {
 	return &v
 }
 
-func sameTimePtr(a, b *metav1.Time) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	return a.Time.Equal(b.Time)
-}
-
 func sameInt32Ptr(a, b *int32) bool {
 	if a == nil && b == nil {
 		return true

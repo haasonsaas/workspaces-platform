@@ -89,6 +89,12 @@ spec:
                       Desktop.
                     type: string
                 type: object
+              idleTimeoutSeconds:
+                description: |-
+                  IdleTimeoutSeconds suspends the desktop after inactivity (based on
+                  lastActiveAt updates from the access gateway). 0 disables autosuspend.
+                format: int32
+                type: integer
               image:
                 description: |-
                   Image is the OCI image used for the desktop container.
@@ -172,6 +178,10 @@ spec:
                       type: string
                     type: array
                 type: object
+              suspended:
+                description: Suspended scales the desktop compute to zero while preserving
+                  storage.
+                type: boolean
               tolerations:
                 items:
                   description: |-
@@ -284,6 +294,12 @@ spec:
                 description: HomeRevision increments when home is reset.
                 format: int64
                 type: integer
+              lastActiveAt:
+                description: |-
+                  LastActiveAt is best-effort and is typically updated by the gateway or
+                  ws-proxy on connection.
+                format: date-time
+                type: string
               lastResetAt:
                 description: LastResetAt records the last observed successful reset
                   request timestamp.
@@ -294,6 +310,8 @@ spec:
               serviceName:
                 description: ServiceName is the in-cluster Service exposing SSH.
                 type: string
+              suspended:
+                type: boolean
             type: object
         type: object
     served: true

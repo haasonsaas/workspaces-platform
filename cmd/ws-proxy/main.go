@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -17,12 +18,17 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/transport/spdy"
 )
+
+const annotationLastActiveAt = "workspaces.platform.dev/last-active-at"
 
 func main() {
 	var (
@@ -109,6 +115,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Best-effort: heartbeat the Desktop last-active timestamp (used for autosuspend).
+	_ = touchDesktop(ctx, cfg, namespace, serviceName, svc)
+
 	remotePort := targetPort
 	if remotePort == 0 {
 		rp, rerr := resolveServiceTargetPort(svc, int32(port), pod)
@@ -127,6 +136,43 @@ func main() {
 		fmt.Fprintf(os.Stderr, "proxy failed: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func touchDesktop(ctx context.Context, cfg *rest.Config, namespace, serviceName string, svc *corev1.Service) error {
+	deskName := ""
+	if svc != nil && svc.Labels != nil {
+		deskName = strings.TrimSpace(svc.Labels["workspaces.platform.dev/desktop"])
+	}
+	if deskName == "" {
+		const (
+			prefix = "desktop-"
+			suffix = "-ssh"
+		)
+		if strings.HasPrefix(serviceName, prefix) && strings.HasSuffix(serviceName, suffix) && len(serviceName) > len(prefix)+len(suffix) {
+			deskName = serviceName[len(prefix) : len(serviceName)-len(suffix)]
+		}
+	}
+	if deskName == "" {
+		return fmt.Errorf("unable to resolve desktop name from service %q", serviceName)
+	}
+
+	dyn, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return err
+	}
+	gvr := schema.GroupVersionResource{Group: "workspaces.platform.dev", Version: "v1alpha1", Resource: "desktops"}
+
+	ts := time.Now().UTC().Format(time.RFC3339Nano)
+	patchObj := map[string]any{
+		"metadata": map[string]any{
+			"annotations": map[string]string{
+				annotationLastActiveAt: ts,
+			},
+		},
+	}
+	b, _ := json.Marshal(patchObj)
+	_, err = dyn.Resource(gvr).Namespace(namespace).Patch(ctx, deskName, types.MergePatchType, b, metav1.PatchOptions{})
+	return err
 }
 
 func parseServiceHost(host string) (service string, namespace string, _ error) {

@@ -53,7 +53,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `wsctl: minimal CLI for workspaces-platform
 
 Usage:
-  wsctl desktop <create|get|list|delete> ...
+  wsctl desktop <create|get|list|suspend|resume|delete> ...
   wsctl agent   <create|run-pr|get|list|delete> ...
   wsctl netgrant <request|approve> ...
   wsctl github  <open-pr> ...
@@ -84,12 +84,17 @@ func cmdDesktop(args []string) {
 			sshKeyFile = fs.String("ssh-key-file", "", "Path to SSH public key file")
 			homeSize   = fs.String("home-size", "50Gi", "Home PVC size (e.g. 50Gi)")
 			storageCls = fs.String("storage-class", "", "Home PVC storage class (optional)")
+			idleTO     = fs.Int("idle-timeout", 0, "Idle timeout seconds (0 disables autosuspend)")
+			suspended  = fs.Bool("suspended", false, "Create suspended (replicas=0)")
 		)
 		fs.Parse(args[1:])
 
 		if strings.TrimSpace(*name) == "" || strings.TrimSpace(*user) == "" || strings.TrimSpace(*sshKeyFile) == "" {
 			fs.Usage()
 			os.Exit(2)
+		}
+		if *idleTO < 0 {
+			die("idle-timeout must be >= 0")
 		}
 
 		keyBytes, err := os.ReadFile(*sshKeyFile)
@@ -128,6 +133,8 @@ func cmdDesktop(args []string) {
 					Value:    "desktops",
 					Effect:   corev1.TaintEffectNoSchedule,
 				}},
+				Suspended:          *suspended,
+				IdleTimeoutSeconds: int32(*idleTO),
 			},
 		}
 
@@ -183,6 +190,34 @@ func cmdDesktop(args []string) {
 		defer cancel()
 		dieIf(k.Delete(ctx, &workspacesv1alpha1.Desktop{ObjectMeta: metav1.ObjectMeta{Name: *name, Namespace: *namespace}}))
 		fmt.Printf("deleted Desktop %s/%s\n", *namespace, *name)
+
+	case "suspend", "resume":
+		wantSuspend := args[0] == "suspend"
+		fs := flag.NewFlagSet("desktop "+args[0], flag.ExitOnError)
+		name := fs.String("name", "", "Desktop name")
+		namespace := fs.String("namespace", "desktops", "Namespace")
+		fs.Parse(args[1:])
+		if strings.TrimSpace(*name) == "" {
+			fs.Usage()
+			os.Exit(2)
+		}
+		k, err := newK8sClient()
+		dieIf(err)
+		var desk workspacesv1alpha1.Desktop
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		dieIf(k.Get(ctx, client.ObjectKey{Namespace: *namespace, Name: *name}, &desk))
+		patch := client.MergeFrom(desk.DeepCopy())
+		desk.Spec.Suspended = wantSuspend
+		if !wantSuspend {
+			// Touch last-active to avoid immediate autosuspend loops.
+			if desk.Annotations == nil {
+				desk.Annotations = map[string]string{}
+			}
+			desk.Annotations["workspaces.platform.dev/last-active-at"] = time.Now().UTC().Format(time.RFC3339Nano)
+		}
+		dieIf(k.Patch(ctx, &desk, patch))
+		fmt.Printf("updated Desktop %s/%s suspended=%v\n", desk.Namespace, desk.Name, wantSuspend)
 
 	default:
 		usage()

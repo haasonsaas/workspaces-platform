@@ -27,6 +27,13 @@ type DesktopSpec struct {
 
 	// SecurityProfile selects a policy bundle (e.g. "standard", "priv-compat").
 	SecurityProfile string `json:"securityProfile,omitempty"`
+
+	// Suspended scales the desktop compute to zero while preserving storage.
+	Suspended bool `json:"suspended,omitempty"`
+
+	// IdleTimeoutSeconds suspends the desktop after inactivity (based on
+	// lastActiveAt updates from the access gateway). 0 disables autosuspend.
+	IdleTimeoutSeconds int32 `json:"idleTimeoutSeconds,omitempty"`
 }
 
 type DesktopSSHSpec struct {
@@ -77,8 +84,14 @@ type DesktopHomeResetSpec struct {
 type DesktopStatus struct {
 	Phase string `json:"phase,omitempty"`
 
+	Suspended bool `json:"suspended,omitempty"`
+
 	// ServiceName is the in-cluster Service exposing SSH.
 	ServiceName string `json:"serviceName,omitempty"`
+
+	// LastActiveAt is best-effort and is typically updated by the gateway or
+	// ws-proxy on connection.
+	LastActiveAt *metav1.Time `json:"lastActiveAt,omitempty"`
 
 	// HomeClaimName is the currently mounted home PVC name.
 	HomeClaimName string `json:"homeClaimName,omitempty"`

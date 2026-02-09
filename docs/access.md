@@ -29,6 +29,8 @@ Host desk-jonathan
 
 `ws-proxy` parses the host as `<service>.<namespace>...`, finds the Service selector, picks a ready pod, then port-forwards to the pod and proxies bytes.
 
+On each successful connection, `ws-proxy` also updates the Desktop annotation `workspaces.platform.dev/last-active-at` (used for autosuspend).
+
 Gateway kubeconfig RBAC needs (minimum):
 - `get` Services in the desktop namespaces
 - `list` Pods in the desktop namespaces

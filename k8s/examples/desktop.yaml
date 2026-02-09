@@ -20,6 +20,9 @@ spec:
     #   requestedAt: "2026-02-09T00:00:00Z"
     #   templateRef: default-home
     #   retainOldClaims: 1
+  # Optional: autosuspend after inactivity (updated by ws-proxy on connect).
+  idleTimeoutSeconds: 3600
+  suspended: false
   nodeSelector:
     workspaces.platform.dev/pool: desktops
   tolerations:
