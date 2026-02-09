@@ -201,9 +201,6 @@ func (s *server) handleCreateNetworkGrant(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "egress_required"})
 		return
 	}
-	if req.TTLSeconds == 0 {
-		req.TTLSeconds = 1800
-	}
 	if req.PolicyMode == "" {
 		req.PolicyMode = workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN
 	}
