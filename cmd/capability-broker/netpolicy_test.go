@@ -38,6 +38,19 @@ func TestNetworkGrantPolicy_ValidateNonAdminNetworkGrant(t *testing.T) {
 		internalSuffixAllowlist: []string{"svc.cluster.local", "cluster.local"},
 		publicEgressAllowlist:   map[string]struct{}{"github.com": {}},
 		publicDNSAllowlist:      map[string]struct{}{"github.map.fastly.net": {}},
+		nonAdminAllowNon443:     false,
+		nonAdminAllowedNon443Ports: map[int32]struct{}{
+			80: {},
+		},
+		profileOverrides: map[string]networkGrantProfileOverride{
+			"browser-automation": {
+				PublicEgressMode:      "allow",
+				AllowNon443:           ptrTo(true),
+				AllowedNon443Ports:    []int32{80},
+				PublicDNSAllowlist:    []string{"example.com"},
+				PublicEgressAllowlist: []string{"example.com"},
+			},
+		},
 	}
 
 	t.Run("allows internal 443", func(t *testing.T) {
@@ -48,7 +61,7 @@ func TestNetworkGrantPolicy_ValidateNonAdminNetworkGrant(t *testing.T) {
 				{Host: "capability-broker.workspaces-system.svc.cluster.local", Ports: []int32{443}},
 			},
 		}
-		if err := p.validateNonAdminNetworkGrant(spec); err != nil {
+		if err := p.validateNonAdminNetworkGrant("restricted", spec); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -62,7 +75,7 @@ func TestNetworkGrantPolicy_ValidateNonAdminNetworkGrant(t *testing.T) {
 				{Host: "capability-broker.workspaces-system.svc.cluster.local", Ports: []int32{80}},
 			},
 		}
-		if err := p.validateNonAdminNetworkGrant(spec); err == nil {
+		if err := p.validateNonAdminNetworkGrant("restricted", spec); err == nil {
 			t.Fatalf("expected error")
 		}
 	})
@@ -75,7 +88,7 @@ func TestNetworkGrantPolicy_ValidateNonAdminNetworkGrant(t *testing.T) {
 				{Host: "crates.io", Ports: []int32{443}},
 			},
 		}
-		if err := p.validateNonAdminNetworkGrant(spec); err == nil {
+		if err := p.validateNonAdminNetworkGrant("restricted", spec); err == nil {
 			t.Fatalf("expected error")
 		}
 	})
@@ -88,7 +101,7 @@ func TestNetworkGrantPolicy_ValidateNonAdminNetworkGrant(t *testing.T) {
 				{Host: "github.com", Ports: []int32{443}},
 			},
 		}
-		if err := p.validateNonAdminNetworkGrant(spec); err != nil {
+		if err := p.validateNonAdminNetworkGrant("restricted", spec); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -102,7 +115,7 @@ func TestNetworkGrantPolicy_ValidateNonAdminNetworkGrant(t *testing.T) {
 			},
 			DNSAllow: []string{"not.allowed.example"},
 		}
-		if err := p.validateNonAdminNetworkGrant(spec); err == nil {
+		if err := p.validateNonAdminNetworkGrant("restricted", spec); err == nil {
 			t.Fatalf("expected error")
 		}
 	})
@@ -116,7 +129,7 @@ func TestNetworkGrantPolicy_ValidateNonAdminNetworkGrant(t *testing.T) {
 			},
 			DNSAllow: []string{"github.map.fastly.net"},
 		}
-		if err := p.validateNonAdminNetworkGrant(spec); err != nil {
+		if err := p.validateNonAdminNetworkGrant("restricted", spec); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -129,7 +142,7 @@ func TestNetworkGrantPolicy_ValidateNonAdminNetworkGrant(t *testing.T) {
 				{Host: "github.com", Ports: []int32{443}},
 			},
 		}
-		if err := p.validateNonAdminNetworkGrant(spec); err == nil {
+		if err := p.validateNonAdminNetworkGrant("restricted", spec); err == nil {
 			t.Fatalf("expected error")
 		}
 	})
@@ -142,8 +155,24 @@ func TestNetworkGrantPolicy_ValidateNonAdminNetworkGrant(t *testing.T) {
 				{Host: "capability-broker.workspaces-system.svc.cluster.local", Ports: []int32{443}},
 			},
 		}
-		if err := p.validateNonAdminNetworkGrant(spec); err == nil {
+		if err := p.validateNonAdminNetworkGrant("restricted", spec); err == nil {
 			t.Fatalf("expected error")
 		}
 	})
+
+	t.Run("browser-automation allows allowNon443 port 80 to public hosts", func(t *testing.T) {
+		spec := workspacesv1alpha1.NetworkGrantSpec{
+			PolicyMode:  workspacesv1alpha1.NetworkGrantPolicyModeProxyConnect,
+			Protocol:    workspacesv1alpha1.NetworkGrantProtocolTCP,
+			AllowNon443: true,
+			Egress: []workspacesv1alpha1.NetworkGrantEgressRule{
+				{Host: "example.com", Ports: []int32{80}},
+			},
+		}
+		if err := p.validateNonAdminNetworkGrant("browser-automation", spec); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
 }
+
+func ptrTo[T any](v T) *T { return &v }

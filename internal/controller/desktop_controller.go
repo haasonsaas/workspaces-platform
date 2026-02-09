@@ -88,6 +88,11 @@ func (r *DesktopReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		labelApp:     "desktop",
 		labelDesktop: desk.Name,
 	}
+	secProfile := strings.TrimSpace(desk.Spec.SecurityProfile)
+	if secProfile == "" {
+		secProfile = "standard"
+	}
+	labels[labelPolicy] = secProfile
 
 	// Track the active home PVC in status so we can support snapshot-based reset
 	// without deleting/recreating the Desktop object.

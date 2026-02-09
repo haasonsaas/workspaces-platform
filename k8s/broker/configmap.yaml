@@ -10,6 +10,17 @@ data:
   broker_network_public_dns_allowlist: "" # CSV exact DNS names allowed in dnsAllow
   broker_network_internal_suffix_allowlist: "svc.cluster.local,cluster.local"
   broker_network_max_grants_per_job: "20" # 0 disables
+  # Policy-profile overrides (JSON). This lets you make profiles first-class
+  # tenants with different public egress rules, ports, and internal suffixes.
+  # Example:
+  # {
+  #   "browser-automation": {
+  #     "publicEgressMode": "allow",
+  #     "allowNon443": true,
+  #     "allowedNon443Ports": [80]
+  #   }
+  # }
+  broker_network_profile_overrides: "{}"
 
   # Comma-separated allowlist of owner/repo entries. Empty => GitHub integration disabled (secure default).
   github_repo_allowlist: ""

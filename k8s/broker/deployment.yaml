@@ -79,6 +79,12 @@ spec:
                   name: capability-broker-config
                   key: broker_network_max_grants_per_job
                   optional: true
+            - name: BROKER_NETWORK_PROFILE_OVERRIDES
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: broker_network_profile_overrides
+                  optional: true
             # GitHub App integration (broker-only writes). Optional, but required to enable /v1/github/open-pr.
             - name: GITHUB_APP_ID
               valueFrom:

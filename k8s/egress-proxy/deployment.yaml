@@ -25,6 +25,8 @@ spec:
           env:
             - name: LISTEN_ADDR
               value: ":8080"
+            - name: HOME
+              value: "/tmp"
             - name: REFRESH_SECONDS
               value: "5"
             - name: DIAL_TIMEOUT_SECONDS

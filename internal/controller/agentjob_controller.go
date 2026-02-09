@@ -8,6 +8,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -77,7 +78,10 @@ func (r *AgentJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		job.Spec.TTLSecondsAfterFinished = &ttl
 		job.Spec.Template.ObjectMeta.Labels = labels
 
-		workspaceEnv := append([]corev1.EnvVar{{Name: "WORKSPACE", Value: "/workspace"}}, aj.Spec.Env...)
+		workspaceEnv := append([]corev1.EnvVar{
+			{Name: "WORKSPACE", Value: "/workspace"},
+			{Name: "WORKSPACES_POLICY_PROFILE", Value: policyProfile},
+		}, aj.Spec.Env...)
 
 		// Optional: inject a cluster egress proxy for CONNECT-based, job-scoped
 		// internet access. This keeps baseline pod egress strict (agent can only
@@ -119,6 +123,21 @@ func (r *AgentJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 					VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 				},
 			},
+		}
+		// Browser automation (Chromium/Playwright/etc) often needs a larger shared
+		// memory segment; add a tmpfs-backed /dev/shm for that policy profile.
+		enableDevShm := policyProfile == "browser-automation"
+		if enableDevShm {
+			q := resource.MustParse("256Mi")
+			pod.Volumes = append(pod.Volumes, corev1.Volume{
+				Name: "dshm",
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{
+						Medium:    corev1.StorageMediumMemory,
+						SizeLimit: &q,
+					},
+				},
+			})
 		}
 
 		sec := &corev1.SecurityContext{
@@ -212,6 +231,9 @@ fi
 					},
 					SecurityContext: sec,
 				}
+				if enableDevShm {
+					checkout.VolumeMounts = append(checkout.VolumeMounts, corev1.VolumeMount{Name: "dshm", MountPath: "/dev/shm"})
+				}
 				pod.InitContainers = append(pod.InitContainers, checkout)
 			}
 
@@ -242,24 +264,29 @@ fi
 				WorkingDir:      workdir,
 				SecurityContext: sec,
 			}
+			if enableDevShm {
+				main.VolumeMounts = append(main.VolumeMounts, corev1.VolumeMount{Name: "dshm", MountPath: "/dev/shm"})
+			}
 			pod.Containers = []corev1.Container{main}
 		} else {
 			// Direct mode: run the container command as-is.
-			pod.Containers = []corev1.Container{
-				{
-					Name:      "agent",
-					Image:     aj.Spec.Image,
-					Command:   aj.Spec.Command,
-					Args:      aj.Spec.Args,
-					Env:       append(workspaceEnv, brokerEnv...),
-					Resources: aj.Spec.Resources,
-					VolumeMounts: []corev1.VolumeMount{
-						{Name: "workspace", MountPath: "/workspace"},
-						{Name: "tmp", MountPath: "/tmp"},
-					},
-					SecurityContext: sec,
-				},
+			vm := []corev1.VolumeMount{
+				{Name: "workspace", MountPath: "/workspace"},
+				{Name: "tmp", MountPath: "/tmp"},
 			}
+			if enableDevShm {
+				vm = append(vm, corev1.VolumeMount{Name: "dshm", MountPath: "/dev/shm"})
+			}
+			pod.Containers = []corev1.Container{{
+				Name:            "agent",
+				Image:           aj.Spec.Image,
+				Command:         aj.Spec.Command,
+				Args:            aj.Spec.Args,
+				Env:             append(workspaceEnv, brokerEnv...),
+				Resources:       aj.Spec.Resources,
+				VolumeMounts:    vm,
+				SecurityContext: sec,
+			}}
 		}
 
 		job.Spec.Template.Spec = pod

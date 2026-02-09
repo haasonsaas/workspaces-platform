@@ -37,6 +37,7 @@ Adds:
 - quotas for `agents` and `desktops`
 - optional CEL admission guardrails (`ValidatingAdmissionPolicy`)
 - namespace-level Pod Security Standards labels (`agents=restricted`, `desktops=baseline`, `workspaces-system=baseline`)
+- broker-as-chokepoint enforcement (admission): `AgentJob` + `NetworkGrant` create/update restricted to the broker (or cluster admins)
 
 ```bash
 kubectl apply -k k8s-overlays/hardened

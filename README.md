@@ -31,8 +31,10 @@ Docs:
 - `docs/config.md`
 - `docs/reproducibility.md`
 - `docs/egress-proxy.md`
+- `docs/policy-profiles.md`
 - `docs/wsctl.md`
 - `docs/troubleshooting.md`
+- `docs/longhorn.md`
 
 This repo is an MVP that compiles and deploys manifests, but you still need to wire:
 - image build/publish for operator/broker/desktop/agent images

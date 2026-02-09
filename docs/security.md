@@ -9,6 +9,8 @@ Day 1 profiles:
 - `agent` (automation): Kata microVMs (`RuntimeClass: kata`) with strict policy.
 - `priv-compat` (opt-in): for rare workflows that need privileged features; isolated node pool + heavier audit.
 
+Agent policy profiles (sub-profiles) are documented in `docs/policy-profiles.md` and are enforced primarily at the broker and network policy layers.
+
 ## Kubernetes Hardening (Baseline)
 
 For agents (and ideally desktops over time):
@@ -120,7 +122,7 @@ These manifests are optional so clusters without this feature can still run the 
 
 - `k8s/optional/hardened/agents-validatingadmissionpolicy.yaml`: denies non-conforming **agent Pods** (host mounts, privileged flags, missing `runtimeClassName=kata`, etc).
 - `k8s/optional/hardened/desktops-validatingadmissionpolicy.yaml`: denies non-conforming **desktop Pods** (host mounts, privileged flags, service account tokens, etc).
-- `k8s/optional/hardened/agentjob-validatingadmissionpolicy.yaml`: enforces **AgentJob CR** guardrails (pinned image digests, runtime class constraints).
+- `k8s/optional/hardened/agentjob-validatingadmissionpolicy.yaml`: enforces **AgentJob CR** guardrails (broker-only create/update, pinned image digests, runtime class constraints, policyProfile allowlist).
 - `k8s/optional/hardened/desktop-validatingadmissionpolicy.yaml`: enforces **Desktop CR** guardrails (pinned image digests when explicitly set).
 - `k8s/optional/hardened/networkgrant-validatingadmissionpolicy.yaml`: restricts **NetworkGrant** create/update to the capability-broker (prevents bypass via direct kubectl edits).
 - `k8s/optional/hardened/ciliumnetworkpolicy-validatingadmissionpolicy.yaml`: restricts **CiliumNetworkPolicy** changes in `agents` to the operator (prevents bypass via direct Cilium policy injection).

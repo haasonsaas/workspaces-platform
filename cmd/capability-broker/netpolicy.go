@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -8,6 +9,34 @@ import (
 	workspacesv1alpha1 "workspaces-platform/api/v1alpha1"
 	"workspaces-platform/internal/netutil"
 )
+
+type networkGrantProfileOverride struct {
+	// PublicEgressMode controls whether non-admin callers can request/approve
+	// public internet egress via NetworkGrants for jobs in this policy profile.
+	//
+	// Supported values: "deny", "allow".
+	PublicEgressMode string `json:"publicEgressMode,omitempty"`
+
+	// InternalSuffixAllowlist extends the default internal suffix list for this
+	// policy profile (exact or suffix match).
+	InternalSuffixAllowlist []string `json:"internalSuffixAllowlist,omitempty"`
+
+	// PublicEgressAllowlist extends the default public egress allowlist when the
+	// effective mode is "deny".
+	PublicEgressAllowlist []string `json:"publicEgressAllowlist,omitempty"`
+
+	// PublicDNSAllowlist extends the default public dnsAllow allowlist when the
+	// effective mode is "deny".
+	PublicDNSAllowlist []string `json:"publicDNSAllowlist,omitempty"`
+
+	// AllowNon443, when true, permits non-admin callers to request non-443 ports
+	// when spec.allowNon443=true (still limited by AllowedNon443Ports).
+	AllowNon443 *bool `json:"allowNon443,omitempty"`
+
+	// AllowedNon443Ports is the set of TCP ports allowed for non-admin, non-443
+	// access when AllowNon443=true. If empty, a safe default of [80] is used.
+	AllowedNon443Ports []int32 `json:"allowedNon443Ports,omitempty"`
+}
 
 // networkGrantPolicy enforces "proxy-first" egress defaults at the broker layer.
 //
@@ -39,6 +68,17 @@ type networkGrantPolicy struct {
 	// AgentJob (defense-in-depth against policy sprawl and object spam).
 	// 0 disables the cap.
 	maxGrantsPerJob int
+
+	// nonAdminAllowNon443 controls whether non-admin callers may request non-443
+	// ports when spec.allowNon443=true.
+	nonAdminAllowNon443 bool
+
+	// nonAdminAllowedNon443Ports is an allowlist of non-443 ports permitted for
+	// non-admin callers when nonAdminAllowNon443=true.
+	nonAdminAllowedNon443Ports map[int32]struct{}
+
+	// profileOverrides optionally adjusts the policy based on AgentJob.spec.policyProfile.
+	profileOverrides map[string]networkGrantProfileOverride
 }
 
 func newNetworkGrantPolicyFromEnv() (networkGrantPolicy, error) {
@@ -63,13 +103,76 @@ func newNetworkGrantPolicyFromEnv() (networkGrantPolicy, error) {
 		maxGrantsPerJob = n
 	}
 
+	overrides, err := parseNetworkGrantProfileOverrides(getenv("BROKER_NETWORK_PROFILE_OVERRIDES", ""))
+	if err != nil {
+		return networkGrantPolicy{}, err
+	}
+
 	return networkGrantPolicy{
 		publicEgressMode:        mode,
 		internalSuffixAllowlist: internalSuffixes,
 		publicEgressAllowlist:   normalizeSet(parseCSVSet(getenv("BROKER_NETWORK_PUBLIC_EGRESS_ALLOWLIST", ""))),
 		publicDNSAllowlist:      normalizeSet(parseCSVSet(getenv("BROKER_NETWORK_PUBLIC_DNS_ALLOWLIST", ""))),
 		maxGrantsPerJob:         maxGrantsPerJob,
+
+		nonAdminAllowNon443:        false,
+		nonAdminAllowedNon443Ports: map[int32]struct{}{},
+		profileOverrides:           overrides,
 	}, nil
+}
+
+func parseNetworkGrantProfileOverrides(raw string) (map[string]networkGrantProfileOverride, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return map[string]networkGrantProfileOverride{}, nil
+	}
+
+	var in map[string]networkGrantProfileOverride
+	if err := json.Unmarshal([]byte(raw), &in); err != nil {
+		return nil, fmt.Errorf("BROKER_NETWORK_PROFILE_OVERRIDES is invalid JSON: %w", err)
+	}
+
+	out := map[string]networkGrantProfileOverride{}
+	for k, v := range in {
+		prof := normalizeToken(k)
+		if prof == "" {
+			continue
+		}
+		if v.PublicEgressMode != "" {
+			m := strings.ToLower(strings.TrimSpace(v.PublicEgressMode))
+			if m != "deny" && m != "allow" {
+				return nil, fmt.Errorf("BROKER_NETWORK_PROFILE_OVERRIDES[%q].publicEgressMode=%q is invalid (want deny|allow)", k, v.PublicEgressMode)
+			}
+			v.PublicEgressMode = m
+		}
+
+		// Validate hostnames in public allowlists (exact hostnames only).
+		for _, h := range v.PublicEgressAllowlist {
+			if err := netutil.ValidateExactHostname(strings.TrimSpace(h)); err != nil {
+				return nil, fmt.Errorf("BROKER_NETWORK_PROFILE_OVERRIDES[%q].publicEgressAllowlist contains invalid hostname %q: %w", k, strings.TrimSpace(h), err)
+			}
+		}
+		for _, h := range v.PublicDNSAllowlist {
+			if err := netutil.ValidateExactHostname(strings.TrimSpace(h)); err != nil {
+				return nil, fmt.Errorf("BROKER_NETWORK_PROFILE_OVERRIDES[%q].publicDNSAllowlist contains invalid hostname %q: %w", k, strings.TrimSpace(h), err)
+			}
+		}
+
+		if v.AllowNon443 != nil && *v.AllowNon443 {
+			for _, p := range v.AllowedNon443Ports {
+				if p <= 0 || p > 65535 {
+					return nil, fmt.Errorf("BROKER_NETWORK_PROFILE_OVERRIDES[%q].allowedNon443Ports contains invalid port %d", k, p)
+				}
+				if p == 443 {
+					return nil, fmt.Errorf("BROKER_NETWORK_PROFILE_OVERRIDES[%q].allowedNon443Ports must not include 443", k)
+				}
+			}
+		}
+
+		out[prof] = v
+	}
+
+	return out, nil
 }
 
 func normalizeToken(s string) string {
@@ -150,9 +253,85 @@ func (p networkGrantPolicy) publicDNSAllowed(host string) bool {
 	return ok
 }
 
+func (p networkGrantPolicy) forProfile(profile string) networkGrantPolicy {
+	prof := normalizeToken(profile)
+	if prof == "" || p.profileOverrides == nil {
+		return p
+	}
+	ov, ok := p.profileOverrides[prof]
+	if !ok {
+		return p
+	}
+
+	out := p
+
+	if ov.PublicEgressMode != "" {
+		out.publicEgressMode = strings.ToLower(strings.TrimSpace(ov.PublicEgressMode))
+	}
+
+	if len(ov.InternalSuffixAllowlist) != 0 {
+		out.internalSuffixAllowlist = normalizeUniqueList(append(out.internalSuffixAllowlist, ov.InternalSuffixAllowlist...))
+	}
+
+	if len(ov.PublicEgressAllowlist) != 0 {
+		if out.publicEgressAllowlist == nil {
+			out.publicEgressAllowlist = map[string]struct{}{}
+		}
+		for _, h := range ov.PublicEgressAllowlist {
+			n := normalizeToken(h)
+			if n == "" {
+				continue
+			}
+			out.publicEgressAllowlist[n] = struct{}{}
+		}
+	}
+
+	if len(ov.PublicDNSAllowlist) != 0 {
+		if out.publicDNSAllowlist == nil {
+			out.publicDNSAllowlist = map[string]struct{}{}
+		}
+		for _, h := range ov.PublicDNSAllowlist {
+			n := normalizeToken(h)
+			if n == "" {
+				continue
+			}
+			out.publicDNSAllowlist[n] = struct{}{}
+		}
+	}
+
+	if ov.AllowNon443 != nil {
+		out.nonAdminAllowNon443 = *ov.AllowNon443
+		if !out.nonAdminAllowNon443 {
+			out.nonAdminAllowedNon443Ports = map[int32]struct{}{}
+		}
+	}
+
+	if out.nonAdminAllowNon443 {
+		if out.nonAdminAllowedNon443Ports == nil {
+			out.nonAdminAllowedNon443Ports = map[int32]struct{}{}
+		}
+		if len(ov.AllowedNon443Ports) != 0 {
+			for _, port := range ov.AllowedNon443Ports {
+				if port <= 0 || port > 65535 || port == 443 {
+					continue
+				}
+				out.nonAdminAllowedNon443Ports[port] = struct{}{}
+			}
+		}
+		// Safe default: allow port 80 only (in addition to always-allowed 443).
+		if len(out.nonAdminAllowedNon443Ports) == 0 {
+			out.nonAdminAllowedNon443Ports[80] = struct{}{}
+		}
+	}
+
+	return out
+}
+
 // validateNonAdminNetworkGrant enforces a strict, proxy-first policy for callers
 // that are not using the broker admin token.
-func (p networkGrantPolicy) validateNonAdminNetworkGrant(spec workspacesv1alpha1.NetworkGrantSpec) error {
+func (p networkGrantPolicy) validateNonAdminNetworkGrant(policyProfile string, spec workspacesv1alpha1.NetworkGrantSpec) error {
+	p = p.forProfile(policyProfile)
+
 	// Keep the "least privilege" shape stable for non-admin usage:
 	// - 443-only
 	// - TCP only
@@ -168,8 +347,8 @@ func (p networkGrantPolicy) validateNonAdminNetworkGrant(spec workspacesv1alpha1
 		return fmt.Errorf("protocol %q not allowed for non-admin", proto)
 	}
 
-	if spec.AllowNon443 {
-		return fmt.Errorf("allowNon443 not allowed for non-admin")
+	if spec.AllowNon443 && !p.nonAdminAllowNon443 {
+		return fmt.Errorf("allowNon443 not allowed for non-admin (policyProfile=%q)", strings.TrimSpace(policyProfile))
 	}
 
 	publicRequested := false
@@ -190,8 +369,19 @@ func (p networkGrantPolicy) validateNonAdminNetworkGrant(spec workspacesv1alpha1
 			ports = []int32{443}
 		}
 		for _, pnum := range ports {
-			if pnum != 443 {
-				return fmt.Errorf("egress[%d] non-443 port %d not allowed for non-admin", i, pnum)
+			if pnum == 443 {
+				continue
+			}
+			if !spec.AllowNon443 {
+				return fmt.Errorf("egress[%d] requests non-443 port %d but allowNon443 is false", i, pnum)
+			}
+			if !p.nonAdminAllowNon443 {
+				return fmt.Errorf("egress[%d] non-443 port %d not allowed for non-admin (policyProfile=%q)", i, pnum, strings.TrimSpace(policyProfile))
+			}
+			if len(p.nonAdminAllowedNon443Ports) != 0 {
+				if _, ok := p.nonAdminAllowedNon443Ports[pnum]; !ok {
+					return fmt.Errorf("egress[%d] non-443 port %d not allowed for non-admin (policyProfile=%q)", i, pnum, strings.TrimSpace(policyProfile))
+				}
 			}
 		}
 

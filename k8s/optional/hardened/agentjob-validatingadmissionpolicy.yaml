@@ -5,18 +5,29 @@ metadata:
 spec:
   failurePolicy: Fail
   matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: agents
     resourceRules:
       - apiGroups: ["workspaces.platform.dev"]
         apiVersions: ["v1alpha1"]
         operations: ["CREATE", "UPDATE"]
         resources: ["agentjobs"]
   validations:
+    # Enforce the "broker is the choke point" model. Without this, anyone with
+    # Kubernetes write access to the agents namespace can bypass launch policies
+    # and run arbitrary code in Kata sandboxes.
+    - expression: "request.userInfo.username == 'system:serviceaccount:workspaces-system:capability-broker' || request.userInfo.groups.exists(g, g == 'system:masters')"
+      message: "AgentJob create/update is restricted to the capability-broker (or cluster admins)"
     # Strong recommendation for reproducibility + supply chain control.
     - expression: "object.spec.image.matches('.*@sha256:[0-9a-fA-F]{64}$')"
       message: "AgentJob spec.image must be pinned by digest (image@sha256:...)"
     # Agent isolation: enforce Kata runtime when explicitly set.
     - expression: "!has(object.spec.runtimeClassName) || object.spec.runtimeClassName == 'kata'"
       message: "AgentJob spec.runtimeClassName must be 'kata' (or omit to use the operator default)"
+    # Policy profile is a security boundary. Keep it explicit and tight by default.
+    - expression: "object.spec.policyProfile == '' || ['restricted','browser-automation','internal'].exists(p, p == object.spec.policyProfile)"
+      message: "AgentJob spec.policyProfile must be empty or one of: restricted, browser-automation, internal"
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -25,4 +36,3 @@ metadata:
 spec:
   policyName: workspaces-agentjob-guardrails
   validationActions: [Deny]
-

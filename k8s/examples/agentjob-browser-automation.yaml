@@ -1,0 +1,24 @@
+apiVersion: workspaces.platform.dev/v1alpha1
+kind: AgentJob
+metadata:
+  name: example-browser
+  namespace: agents
+spec:
+  image: ghcr.io/haasonsaas/workspaces-agent-runner:latest
+  # NOTE: this repo's agent runner image does not ship a browser. This example
+  # is about the *policy profile wiring* (operator adds a tmpfs /dev/shm mount).
+  script: |
+    set -euo pipefail
+    echo "policyProfile=${WORKSPACES_POLICY_PROFILE:-}"
+    df -h /dev/shm || true
+    echo "run your Playwright/Selenium task here"
+  policyProfile: browser-automation
+  ttlSecondsAfterFinished: 3600
+  runtimeClassName: kata
+  nodeSelector:
+    workspaces.platform.dev/pool: agents
+  tolerations:
+    - key: workspaces.platform.dev/pool
+      operator: Equal
+      value: agents
+      effect: NoSchedule

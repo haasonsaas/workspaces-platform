@@ -390,7 +390,7 @@ func cmdNetgrant(args []string) {
 			namespace   = fs.String("namespace", "agents", "Namespace")
 			agentJob    = fs.String("agentjob", "", "AgentJob name the grant applies to")
 			purpose     = fs.String("purpose", "", "Purpose (required)")
-			policyMode  = fs.String("policy-mode", "STRICT_FQDN", "PolicyMode (STRICT_FQDN or PROXY_CONNECT)")
+			policyMode  = fs.String("policy-mode", "AUTO", "PolicyMode (AUTO, STRICT_FQDN, or PROXY_CONNECT)")
 			ttl         = fs.Int("ttl", 1800, "TTL seconds")
 			allowNon443 = fs.Bool("allow-non-443", false, "Allow non-443 ports")
 			egress      multiFlag
@@ -425,12 +425,17 @@ func cmdNetgrant(args []string) {
 		payload := map[string]any{
 			"namespace":   strings.TrimSpace(*namespace),
 			"agentJob":    strings.TrimSpace(*agentJob),
-			"policyMode":  strings.TrimSpace(*policyMode),
 			"protocol":    "TCP",
 			"purpose":     strings.TrimSpace(*purpose),
 			"egress":      rules,
 			"ttlSeconds":  *ttl,
 			"allowNon443": *allowNon443,
+		}
+		if pm := strings.ToUpper(strings.TrimSpace(*policyMode)); pm != "" && pm != "AUTO" {
+			if pm != "STRICT_FQDN" && pm != "PROXY_CONNECT" {
+				die("invalid --policy-mode (expected AUTO|STRICT_FQDN|PROXY_CONNECT)")
+			}
+			payload["policyMode"] = pm
 		}
 		if len(dnsAllow) != 0 {
 			out := []string{}

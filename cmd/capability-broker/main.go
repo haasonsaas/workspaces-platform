@@ -212,6 +212,10 @@ func (s *server) handleCreateNetworkGrant(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "agentjob_not_found"})
 		return
 	}
+	policyProfile := strings.TrimSpace(aj.Spec.PolicyProfile)
+	if policyProfile == "" {
+		policyProfile = "restricted"
+	}
 
 	// Defense-in-depth: cap the number of grants per job to prevent policy sprawl
 	// and object spam. Admin callers can bypass this cap.
@@ -254,8 +258,12 @@ func (s *server) handleCreateNetworkGrant(w http.ResponseWriter, r *http.Request
 		// - internal => STRICT_FQDN (direct in-cluster)
 		// - public  => PROXY_CONNECT (proxy-first)
 		publicRequested := false
+		pol := s.netPolicy
+		if !s.isAdmin(r) {
+			pol = s.netPolicy.forProfile(policyProfile)
+		}
 		for _, er := range req.Egress {
-			if !s.netPolicy.hostIsInternal(er.Host) {
+			if !pol.hostIsInternal(er.Host) {
 				publicRequested = true
 				break
 			}
@@ -277,7 +285,7 @@ func (s *server) handleCreateNetworkGrant(w http.ResponseWriter, r *http.Request
 			DNSAllow:    req.DNSAllow,
 			AllowNon443: req.AllowNon443,
 		}
-		if err := s.netPolicy.validateNonAdminNetworkGrant(spec); err != nil {
+		if err := s.netPolicy.validateNonAdminNetworkGrant(policyProfile, spec); err != nil {
 			if s.audit != nil {
 				reqID := middleware.GetReqID(ctx)
 				s.audit.Emit("networkgrant.request_denied", map[string]any{
@@ -285,6 +293,7 @@ func (s *server) handleCreateNetworkGrant(w http.ResponseWriter, r *http.Request
 					"remote_addr":     r.RemoteAddr,
 					"namespace":       strings.TrimSpace(req.Namespace),
 					"agentjob":        strings.TrimSpace(req.AgentJob),
+					"policyProfile":   policyProfile,
 					"egress_count":    len(req.Egress),
 					"dns_allow_count": len(req.DNSAllow),
 					"error":           err.Error(),
@@ -341,6 +350,7 @@ func (s *server) handleCreateNetworkGrant(w http.ResponseWriter, r *http.Request
 			"namespace":       ng.Namespace,
 			"name":            ng.Name,
 			"agentjob":        strings.TrimSpace(req.AgentJob),
+			"policyProfile":   policyProfile,
 			"egress_count":    len(req.Egress),
 			"dns_allow_count": len(req.DNSAllow),
 			"purpose":         strings.TrimSpace(req.Purpose),
@@ -485,17 +495,29 @@ func (s *server) handleApproveNetworkGrantGitHub(w http.ResponseWriter, r *http.
 	// public internet egress unless the hostnames are explicitly allowlisted.
 	// Admin can always override via the admin approval endpoint.
 	if !s.isAdmin(r) {
-		if err := s.netPolicy.validateNonAdminNetworkGrant(ng.Spec); err != nil {
+		profile := "restricted"
+		if ng.Spec.AgentJobRef != nil && strings.TrimSpace(ng.Spec.AgentJobRef.Name) != "" {
+			var aj workspacesv1alpha1.AgentJob
+			if err := s.k8s.Get(ctx, client.ObjectKey{Namespace: ns, Name: strings.TrimSpace(ng.Spec.AgentJobRef.Name)}, &aj); err != nil {
+				writeJSON(w, http.StatusNotFound, map[string]any{"error": "agentjob_not_found"})
+				return
+			}
+			if v := strings.TrimSpace(aj.Spec.PolicyProfile); v != "" {
+				profile = v
+			}
+		}
+		if err := s.netPolicy.validateNonAdminNetworkGrant(profile, ng.Spec); err != nil {
 			if s.audit != nil {
 				reqID := middleware.GetReqID(ctx)
 				s.audit.Emit("networkgrant.approve_denied", map[string]any{
-					"request_id":  reqID,
-					"remote_addr": r.RemoteAddr,
-					"namespace":   ng.Namespace,
-					"name":        ng.Name,
-					"approved_by": strings.TrimSpace(body.ApprovedBy),
-					"via":         "github",
-					"error":       err.Error(),
+					"request_id":    reqID,
+					"remote_addr":   r.RemoteAddr,
+					"namespace":     ng.Namespace,
+					"name":          ng.Name,
+					"approved_by":   strings.TrimSpace(body.ApprovedBy),
+					"via":           "github",
+					"policyProfile": profile,
+					"error":         err.Error(),
 				})
 			}
 			writeJSON(w, http.StatusForbidden, map[string]any{

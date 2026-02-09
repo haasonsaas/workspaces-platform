@@ -30,6 +30,13 @@ Common causes (and fixes):
 - **Non-443 ports**
   - Error: `requests non-443 port ... but allowNon443 is false`
   - Fix: set `spec.allowNon443: true` (and keep ports as narrow as possible).
+  - Note: broker policy may still deny non-443 for non-admin callers depending on the AgentJob `policyProfile` (see `docs/policy-profiles.md`).
+
+- **Broker denies allowNon443**
+  - Error: `allowNon443 not allowed for non-admin ...`
+  - Fix:
+    - use an admin approval flow, or
+    - configure `BROKER_NETWORK_PROFILE_OVERRIDES` to allow non-443 ports for a specific policy profile (recommended for `browser-automation`).
 
 - **IP literals**
   - Error: `ip literals are not allowed`

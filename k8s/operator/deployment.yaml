@@ -21,6 +21,8 @@ spec:
         - name: operator
           image: ghcr.io/haasonsaas/workspaces-operator:latest
           env:
+            - name: HOME
+              value: "/tmp"
             - name: AGENT_EGRESS_PROXY_URL
               valueFrom:
                 configMapKeyRef:

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -96,6 +98,16 @@ func cmdDoctor(args []string) {
 			return "", "Install Cilium (required) and ensure the Cilium CRDs are registered.", err
 		})
 
+		run(false, "ValidatingAdmissionPolicy support (optional)", func(ctx context.Context) (string, string, error) {
+			// If unsupported, hardened overlays can still be partially applied (quotas, Cilium policies, etc).
+			gvr := schema.GroupVersionResource{Group: "admissionregistration.k8s.io", Version: "v1", Resource: "validatingadmissionpolicies"}
+			_, err := dyn.Resource(gvr).List(ctx, metav1.ListOptions{Limit: 1})
+			if err != nil {
+				return "", "If you want CEL admission guardrails, upgrade the cluster to a version that supports ValidatingAdmissionPolicy.", err
+			}
+			return "supported", "", nil
+		})
+
 		run(true, "CSI snapshot CRDs (VolumeSnapshot*)", func(ctx context.Context) (string, string, error) {
 			for _, n := range []string{
 				"volumesnapshots.snapshot.storage.k8s.io",
@@ -174,6 +186,39 @@ func cmdDoctor(args []string) {
 			return "present", "", nil
 		})
 
+		run(true, "ConfigMap capability-broker-config", func(ctx context.Context) (string, string, error) {
+			var cm corev1.ConfigMap
+			if err := k.Get(ctx, client.ObjectKey{Namespace: sysNS, Name: "capability-broker-config"}, &cm); err != nil {
+				return "", "Apply the base manifests: `kubectl apply -k k8s`.", err
+			}
+			mode := strings.ToLower(strings.TrimSpace(cm.Data["broker_network_public_egress_mode"]))
+			if mode == "" {
+				mode = "deny"
+			}
+			if mode != "deny" && mode != "allow" {
+				return "", "Set capability-broker-config.data.broker_network_public_egress_mode to deny|allow.", fmt.Errorf("invalid broker_network_public_egress_mode=%q", cm.Data["broker_network_public_egress_mode"])
+			}
+			if raw := strings.TrimSpace(cm.Data["broker_network_profile_overrides"]); raw != "" && raw != "{}" {
+				var tmp any
+				if err := json.Unmarshal([]byte(raw), &tmp); err != nil {
+					return "", "Fix capability-broker-config.data.broker_network_profile_overrides to be valid JSON (or set it to '{}').", fmt.Errorf("invalid broker_network_profile_overrides JSON")
+				}
+			}
+			return "mode=" + mode, "", nil
+		})
+
+		run(true, "ConfigMap workspaces-operator-config", func(ctx context.Context) (string, string, error) {
+			var cm corev1.ConfigMap
+			if err := k.Get(ctx, client.ObjectKey{Namespace: sysNS, Name: "workspaces-operator-config"}, &cm); err != nil {
+				return "", "Apply the base manifests: `kubectl apply -k k8s`.", err
+			}
+			proxyURL := strings.TrimSpace(cm.Data["agent_egress_proxy_url"])
+			if proxyURL == "" {
+				return "", "Set workspaces-operator-config.data.agent_egress_proxy_url to the egress-proxy Service URL (recommended).", fmt.Errorf("agent_egress_proxy_url is empty")
+			}
+			return "agent_egress_proxy_url=" + proxyURL, "", nil
+		})
+
 		run(true, "Deployment workspaces-operator", func(ctx context.Context) (string, string, error) {
 			return checkDeploymentReady(ctx, k, sysNS, "workspaces-operator", "Apply the base manifests: `kubectl apply -k k8s`.")
 		})
@@ -184,13 +229,79 @@ func cmdDoctor(args []string) {
 			return checkDeploymentReady(ctx, k, sysNS, "egress-proxy", "Apply the base manifests: `kubectl apply -k k8s`.")
 		})
 
-		run(false, "Cilium policy agents-default-deny", func(ctx context.Context) (string, string, error) {
+		run(true, "Service capability-broker", func(ctx context.Context) (string, string, error) {
+			var svc corev1.Service
+			if err := k.Get(ctx, client.ObjectKey{Namespace: sysNS, Name: "capability-broker"}, &svc); err != nil {
+				return "", "Apply the base manifests: `kubectl apply -k k8s`.", err
+			}
+			return "port=8080", "", nil
+		})
+
+		run(true, "Service egress-proxy", func(ctx context.Context) (string, string, error) {
+			var svc corev1.Service
+			if err := k.Get(ctx, client.ObjectKey{Namespace: sysNS, Name: "egress-proxy"}, &svc); err != nil {
+				return "", "Apply the base manifests: `kubectl apply -k k8s`.", err
+			}
+			return "port=8080", "", nil
+		})
+
+		run(true, "Cilium policy agents-default-deny", func(ctx context.Context) (string, string, error) {
 			gvr := schema.GroupVersionResource{Group: "cilium.io", Version: "v2", Resource: "ciliumnetworkpolicies"}
 			_, err := dyn.Resource(gvr).Namespace(strings.TrimSpace(*agentsNamespace)).Get(ctx, "agents-default-deny", metav1.GetOptions{})
 			if err != nil {
 				return "", "Apply: `kubectl apply -f k8s/policies/agents-default-deny.yaml` (or `kubectl apply -k k8s`).", err
 			}
 			return "present", "", nil
+		})
+
+		run(true, "Cilium policy agents-allow-internal-proxies", func(ctx context.Context) (string, string, error) {
+			gvr := schema.GroupVersionResource{Group: "cilium.io", Version: "v2", Resource: "ciliumnetworkpolicies"}
+			_, err := dyn.Resource(gvr).Namespace(strings.TrimSpace(*agentsNamespace)).Get(ctx, "agents-allow-internal-proxies", metav1.GetOptions{})
+			if err != nil {
+				return "", "Apply: `kubectl apply -f k8s/policies/agents-allow-internal-proxies.yaml` (or `kubectl apply -k k8s`).", err
+			}
+			return "present", "", nil
+		})
+
+		run(true, "Cilium policy egress-proxy-ingress", func(ctx context.Context) (string, string, error) {
+			gvr := schema.GroupVersionResource{Group: "cilium.io", Version: "v2", Resource: "ciliumnetworkpolicies"}
+			_, err := dyn.Resource(gvr).Namespace(sysNS).Get(ctx, "egress-proxy-ingress", metav1.GetOptions{})
+			if err != nil {
+				return "", "Apply the base manifests: `kubectl apply -k k8s`.", err
+			}
+			return "present", "", nil
+		})
+
+		run(false, "Node pools labeled (workspaces.platform.dev/pool)", func(ctx context.Context) (string, string, error) {
+			var nodes corev1.NodeList
+			if err := k.List(ctx, &nodes); err != nil {
+				return "", "", err
+			}
+			want := map[string]int{"agents": 0, "desktops": 0}
+			for i := range nodes.Items {
+				n := &nodes.Items[i]
+				pool := strings.TrimSpace(n.Labels["workspaces.platform.dev/pool"])
+				if pool == "" {
+					continue
+				}
+				if _, ok := want[pool]; ok {
+					want[pool]++
+				}
+			}
+			if want["agents"] == 0 || want["desktops"] == 0 {
+				return fmt.Sprintf("agents=%d desktops=%d", want["agents"], want["desktops"]),
+					"Label (and ideally taint) node pools for agents/desktops: workspaces.platform.dev/pool=agents|desktops (and taints matching the manifests).",
+					fmt.Errorf("missing one or more node pools")
+			}
+			return fmt.Sprintf("agents=%d desktops=%d", want["agents"], want["desktops"]), "", nil
+		})
+
+		run(false, "StorageClass longhorn (recommended)", func(ctx context.Context) (string, string, error) {
+			var sc storagev1.StorageClass
+			if err := k.Get(ctx, client.ObjectKey{Name: "longhorn"}, &sc); err != nil {
+				return "", "Install Longhorn and ensure a StorageClass named 'longhorn' exists (or adjust your Desktop/HomeTemplate specs).", err
+			}
+			return "provisioner=" + strings.TrimSpace(sc.Provisioner), "", nil
 		})
 
 		// Storage: snapshot class (optional but recommended when using Longhorn).
@@ -209,6 +320,36 @@ func cmdDoctor(args []string) {
 				return "driver=" + driver, "", nil
 			})
 		}
+
+		run(false, "Hardened overlay (ValidatingAdmissionPolicy objects)", func(ctx context.Context) (string, string, error) {
+			gvr := schema.GroupVersionResource{Group: "admissionregistration.k8s.io", Version: "v1", Resource: "validatingadmissionpolicies"}
+			_, err := dyn.Resource(gvr).Get(ctx, "workspaces-agents-pod-hardening", metav1.GetOptions{})
+			if err != nil {
+				return "", "Apply: `kubectl apply -k k8s-overlays/hardened` (optional).", err
+			}
+			return "present", "", nil
+		})
+
+		run(false, "Pod Security Standards labels on namespaces", func(ctx context.Context) (string, string, error) {
+			nsNames := []string{strings.TrimSpace(*systemNamespace), strings.TrimSpace(*agentsNamespace), strings.TrimSpace(*desktopsNS)}
+			missing := []string{}
+			for _, n := range nsNames {
+				if n == "" {
+					continue
+				}
+				var nsObj corev1.Namespace
+				if err := k.Get(ctx, client.ObjectKey{Name: n}, &nsObj); err != nil {
+					continue
+				}
+				if nsObj.Labels == nil || strings.TrimSpace(nsObj.Labels["pod-security.kubernetes.io/enforce"]) == "" {
+					missing = append(missing, n)
+				}
+			}
+			if len(missing) != 0 {
+				return "missing=" + strings.Join(missing, ","), "Apply: `kubectl apply -k k8s-overlays/hardened` (optional) to add namespace PSS labels.", fmt.Errorf("missing PSS labels")
+			}
+			return "present", "", nil
+		})
 	}
 
 	if failures != 0 {

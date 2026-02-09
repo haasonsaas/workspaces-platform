@@ -6,6 +6,9 @@ This project assumes CSI storage that supports:
 
 Longhorn is the recommended default for on-prem.
 
+Operational runbooks:
+- `docs/longhorn.md` (Longhorn-specific ops + warm start + reset)
+
 ## Required Cluster Addons
 
 1. Longhorn (CSI driver)

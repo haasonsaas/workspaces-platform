@@ -23,6 +23,8 @@ spec:
           env:
             - name: LISTEN_ADDR
               value: ":8080"
+            - name: HOME
+              value: "/tmp"
             - name: GITHUB_WEBHOOK_SECRET
               valueFrom:
                 secretKeyRef:
