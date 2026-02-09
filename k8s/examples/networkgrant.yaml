@@ -1,0 +1,20 @@
+apiVersion: workspaces.platform.dev/v1alpha1
+kind: NetworkGrant
+metadata:
+  name: example-github
+  namespace: agents
+spec:
+  approved: true
+  approvedBy: admin
+  reason: "allow GitHub for this job"
+  ttlSeconds: 1800
+  podSelector:
+    matchLabels:
+      workspaces.platform.dev/app: agent
+      workspaces.platform.dev/agentjob: example
+  egress:
+    - host: github.com
+      ports: [443]
+    - host: api.github.com
+      ports: [443]
+

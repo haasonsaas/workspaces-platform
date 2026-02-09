@@ -1,0 +1,21 @@
+apiVersion: workspaces.platform.dev/v1alpha1
+kind: Desktop
+metadata:
+  name: jonathan
+  namespace: desktops
+spec:
+  user: jonathan
+  ssh:
+    authorizedKeys:
+      # TODO: replace with your public key(s)
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... you@laptop"
+  home:
+    size: 50Gi
+  nodeSelector:
+    workspaces.platform.dev/pool: desktops
+  tolerations:
+    - key: workspaces.platform.dev/pool
+      operator: Equal
+      value: desktops
+      effect: NoSchedule
+

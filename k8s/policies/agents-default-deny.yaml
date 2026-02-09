@@ -1,0 +1,39 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: agents-default-deny
+  namespace: agents
+spec:
+  endpointSelector:
+    matchLabels:
+      workspaces.platform.dev/app: agent
+  egress:
+    # Allow DNS to kube-dns (adjust labels for your cluster if needed).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # Allow talking to the capability broker (so agents can request scoped unlocks).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: workspaces-system
+            app: capability-broker
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # Baseline public allowlist (example). Prefer routing registries through your own proxies.
+    - toFQDNs:
+        - matchName: github.com
+        - matchName: api.github.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+  ingress: []

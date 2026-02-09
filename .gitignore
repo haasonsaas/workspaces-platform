@@ -1,0 +1,11 @@
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.tmp
+*.log
+
+bin/
+dist/
+out/
+

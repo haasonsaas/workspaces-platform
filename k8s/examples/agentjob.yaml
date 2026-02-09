@@ -1,0 +1,23 @@
+apiVersion: workspaces.platform.dev/v1alpha1
+kind: AgentJob
+metadata:
+  name: example
+  namespace: agents
+spec:
+  image: ghcr.io/workspaces-platform/agent-runner:latest
+  command: ["/bin/sh", "-lc"]
+  args:
+    - |
+      set -euo pipefail
+      echo "hello from agent"
+      sleep 5
+  policyProfile: restricted
+  ttlSecondsAfterFinished: 3600
+  runtimeClassName: kata
+  nodeSelector:
+    workspaces.platform.dev/pool: agents
+  tolerations:
+    - key: workspaces.platform.dev/pool
+      operator: Equal
+      value: agents
+      effect: NoSchedule

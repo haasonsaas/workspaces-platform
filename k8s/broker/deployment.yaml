@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: capability-broker
+  namespace: workspaces-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: capability-broker
+  template:
+    metadata:
+      labels:
+        app: capability-broker
+    spec:
+      serviceAccountName: capability-broker
+      containers:
+        - name: broker
+          # TODO: publish/build this image.
+          image: ghcr.io/workspaces-platform/capability-broker:latest
+          env:
+            - name: LISTEN_ADDR
+              value: ":8080"
+            # Optional: set to require admin auth for approval endpoints.
+            - name: BROKER_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: capability-broker-secrets
+                  key: admin_token
+                  optional: true
+          ports:
+            - name: http
+              containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: capability-broker
+  namespace: workspaces-system
+spec:
+  selector:
+    app: capability-broker
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+

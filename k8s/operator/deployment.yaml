@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workspaces-operator
+  namespace: workspaces-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: workspaces-operator
+  template:
+    metadata:
+      labels:
+        app: workspaces-operator
+    spec:
+      serviceAccountName: workspaces-operator
+      containers:
+        - name: operator
+          # TODO: publish/build this image.
+          image: ghcr.io/workspaces-platform/workspaces-operator:latest
+          args:
+            - "--leader-elect=true"
+            - "--metrics-bind-address=:8080"
+            - "--health-probe-bind-address=:8081"
+          ports:
+            - name: metrics
+              containerPort: 8080
+            - name: healthz
+              containerPort: 8081
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+

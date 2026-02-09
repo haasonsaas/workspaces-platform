@@ -1,0 +1,30 @@
+# workspaces-platform Desktop sshd config (MVP)
+
+Include /etc/ssh/sshd_config.d/*.conf
+
+Port 2222
+Protocol 2
+
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+PermitEmptyPasswords no
+
+PubkeyAuthentication yes
+
+# The entrypoint copies keys here with safe perms.
+AuthorizedKeysFile .ssh/authorized_keys
+
+PermitRootLogin no
+
+UsePAM yes
+
+X11Forwarding no
+AllowTcpForwarding yes
+PermitTunnel no
+GatewayPorts no
+
+ClientAliveInterval 60
+ClientAliveCountMax 3
+
+Subsystem sftp /usr/lib/openssh/sftp-server

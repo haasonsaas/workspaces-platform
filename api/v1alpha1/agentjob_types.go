@@ -1,0 +1,65 @@
+package v1alpha1
+
+import (
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+// AgentJobSpec defines the desired state of an AgentJob.
+type AgentJobSpec struct {
+	// Image is the OCI image used for the agent job.
+	Image string `json:"image"`
+
+	// Command and Args are passed to the container.
+	Command []string `json:"command,omitempty"`
+	Args    []string `json:"args,omitempty"`
+
+	Env []corev1.EnvVar `json:"env,omitempty"`
+
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// NodeSelector and Tolerations let you target an agent node pool.
+	NodeSelector map[string]string   `json:"nodeSelector,omitempty"`
+	Tolerations  []corev1.Toleration `json:"tolerations,omitempty"`
+
+	// RuntimeClassName should point at the Kata RuntimeClass for strong isolation.
+	// If omitted, the operator default is used.
+	RuntimeClassName *string `json:"runtimeClassName,omitempty"`
+
+	// TTLSecondsAfterFinished is applied to the underlying Job.
+	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
+
+	// PolicyProfile selects a policy bundle (e.g. "restricted", "browser-automation").
+	PolicyProfile string `json:"policyProfile,omitempty"`
+}
+
+type AgentJobStatus struct {
+	Phase   string `json:"phase,omitempty"`
+	JobName string `json:"jobName,omitempty"`
+
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:scope=Namespaced,shortName=ajob
+
+type AgentJob struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   AgentJobSpec   `json:"spec,omitempty"`
+	Status AgentJobStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+type AgentJobList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []AgentJob `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&AgentJob{}, &AgentJobList{})
+}
