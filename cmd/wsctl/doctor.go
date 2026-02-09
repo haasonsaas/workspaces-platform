@@ -163,6 +163,17 @@ func cmdDoctor(args []string) {
 		})
 
 		sysNS := strings.TrimSpace(*systemNamespace)
+		run(true, "Secret capability-broker-secrets (job_jwt_secret)", func(ctx context.Context) (string, string, error) {
+			var s corev1.Secret
+			if err := k.Get(ctx, client.ObjectKey{Namespace: sysNS, Name: "capability-broker-secrets"}, &s); err != nil {
+				return "", "Apply: `kubectl apply -f k8s/examples/capability-broker-secrets.yaml` (edit the placeholder values).", err
+			}
+			if v := s.Data["job_jwt_secret"]; len(v) == 0 {
+				return "", "Ensure Secret workspaces-system/capability-broker-secrets contains a non-empty `job_jwt_secret` key.", fmt.Errorf("missing job_jwt_secret key")
+			}
+			return "present", "", nil
+		})
+
 		run(true, "Deployment workspaces-operator", func(ctx context.Context) (string, string, error) {
 			return checkDeploymentReady(ctx, k, sysNS, "workspaces-operator", "Apply the base manifests: `kubectl apply -k k8s`.")
 		})
