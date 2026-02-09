@@ -187,6 +187,12 @@ func (s *server) handleCreateNetworkGrant(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
 		return
 	}
+	// Ensure the job exists so grants can't float detached from a real sandbox.
+	var aj workspacesv1alpha1.AgentJob
+	if err := s.k8s.Get(ctx, client.ObjectKey{Namespace: strings.TrimSpace(req.Namespace), Name: strings.TrimSpace(req.AgentJob)}, &aj); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "agentjob_not_found"})
+		return
+	}
 	if strings.TrimSpace(req.Purpose) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "purpose_required"})
 		return

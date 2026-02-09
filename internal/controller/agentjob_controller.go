@@ -37,6 +37,11 @@ func (r *AgentJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		labelApp:      "agent",
 		labelAgentJob: aj.Name,
 	}
+	policyProfile := strings.TrimSpace(aj.Spec.PolicyProfile)
+	if policyProfile == "" {
+		policyProfile = "restricted"
+	}
+	labels[labelPolicy] = policyProfile
 
 	jobName := fmt.Sprintf("agentjob-%s", aj.Name)
 	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: jobName, Namespace: aj.Namespace}}
@@ -245,10 +250,70 @@ fi
 			break
 		}
 	}
-	if aj.Status.Phase != phase || aj.Status.JobName != jobName {
+
+	// Best-effort: resolve selected pod + exit code for reporting.
+	podName := ""
+	var exitCode *int32
+	exitReason := ""
+	var pods corev1.PodList
+	if err := r.List(ctx, &pods, client.InNamespace(aj.Namespace), client.MatchingLabels{"job-name": jobName}); err == nil {
+		var sel *corev1.Pod
+		bestRank := -1
+		var bestCreated metav1.Time
+		rank := func(p *corev1.Pod) int {
+			switch p.Status.Phase {
+			case corev1.PodSucceeded, corev1.PodFailed:
+				return 2
+			case corev1.PodRunning:
+				return 1
+			default:
+				return 0
+			}
+		}
+		for i := range pods.Items {
+			p := &pods.Items[i]
+			rk := rank(p)
+			if sel == nil || rk > bestRank || (rk == bestRank && p.CreationTimestamp.After(bestCreated.Time)) {
+				sel = p
+				bestRank = rk
+				bestCreated = p.CreationTimestamp
+			}
+		}
+		if sel != nil {
+			podName = sel.Name
+			for _, cs := range sel.Status.ContainerStatuses {
+				if cs.Name != "agent" || cs.State.Terminated == nil {
+					continue
+				}
+				ec := int32(cs.State.Terminated.ExitCode)
+				exitCode = &ec
+				exitReason = strings.TrimSpace(cs.State.Terminated.Reason)
+				if exitReason == "" {
+					exitReason = strings.TrimSpace(cs.State.Terminated.Message)
+				}
+				break
+			}
+		}
+	}
+
+	startedAt := copyTimePtr(job.Status.StartTime)
+	completedAt := copyTimePtr(job.Status.CompletionTime)
+
+	if aj.Status.Phase != phase ||
+		aj.Status.JobName != jobName ||
+		aj.Status.PodName != podName ||
+		!sameTimePtr(aj.Status.StartedAt, startedAt) ||
+		!sameTimePtr(aj.Status.CompletedAt, completedAt) ||
+		!sameInt32Ptr(aj.Status.ExitCode, exitCode) ||
+		strings.TrimSpace(aj.Status.ExitReason) != exitReason {
 		patch := client.MergeFrom(aj.DeepCopy())
 		aj.Status.Phase = phase
 		aj.Status.JobName = jobName
+		aj.Status.PodName = podName
+		aj.Status.StartedAt = startedAt
+		aj.Status.CompletedAt = completedAt
+		aj.Status.ExitCode = exitCode
+		aj.Status.ExitReason = exitReason
 		_ = r.Status().Patch(ctx, &aj, patch)
 	}
 
@@ -262,6 +327,34 @@ fi
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func copyTimePtr(t *metav1.Time) *metav1.Time {
+	if t == nil {
+		return nil
+	}
+	v := metav1.NewTime(t.Time)
+	return &v
+}
+
+func sameTimePtr(a, b *metav1.Time) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return a.Time.Equal(b.Time)
+}
+
+func sameInt32Ptr(a, b *int32) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
 }
 
 func (r *AgentJobReconciler) SetupWithManager(mgr ctrl.Manager) error {

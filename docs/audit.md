@@ -41,6 +41,7 @@ Config (broker):
 - `AUDIT_CHECKPOINT_EVERY_N` (default: `500`)
 - `AUDIT_CHECKPOINT_EVERY_SECONDS` (default: `60`)
 - `AUDIT_FSYNC_ON_CHECKPOINT=true|false` (default: `false`)
+- `AUDIT_HMAC_KEY` (optional): hex-encoded key to HMAC-sign checkpoint records (defense-in-depth before Vault transit signing)
 
 Implementation: `internal/audit/` and wired into `cmd/capability-broker/`.
 

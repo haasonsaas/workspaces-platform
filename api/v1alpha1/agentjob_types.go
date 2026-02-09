@@ -64,6 +64,16 @@ type AgentJobStatus struct {
 	Phase   string `json:"phase,omitempty"`
 	JobName string `json:"jobName,omitempty"`
 
+	// PodName is the selected pod backing the Job (best-effort; typically a single pod).
+	PodName string `json:"podName,omitempty"`
+
+	StartedAt   *metav1.Time `json:"startedAt,omitempty"`
+	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
+
+	// ExitCode/ExitReason are best-effort values for the main agent container.
+	ExitCode   *int32 `json:"exitCode,omitempty"`
+	ExitReason string `json:"exitReason,omitempty"`
+
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 

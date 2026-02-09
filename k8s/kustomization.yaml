@@ -10,3 +10,4 @@ resources:
   - operator
   - broker
   - policies/agents-default-deny.yaml
+  - policies/agents-allow-internal-proxies.yaml

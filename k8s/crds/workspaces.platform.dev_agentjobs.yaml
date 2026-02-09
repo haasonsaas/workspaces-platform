@@ -365,6 +365,9 @@ spec:
             type: object
           status:
             properties:
+              completedAt:
+                format: date-time
+                type: string
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -421,9 +424,23 @@ spec:
                   - type
                   type: object
                 type: array
+              exitCode:
+                description: ExitCode/ExitReason are best-effort values for the main
+                  agent container.
+                format: int32
+                type: integer
+              exitReason:
+                type: string
               jobName:
                 type: string
               phase:
+                type: string
+              podName:
+                description: PodName is the selected pod backing the Job (best-effort;
+                  typically a single pod).
+                type: string
+              startedAt:
+                format: date-time
                 type: string
             type: object
         type: object

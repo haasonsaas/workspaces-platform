@@ -27,6 +27,9 @@ Allowed by default:
 - capability broker
 - required package registries/proxies (prefer internal mirrors; agents should use proxies by default)
 
+Implementation:
+- `k8s/policies/agents-allow-internal-proxies.yaml` allows egress from agent pods to in-cluster proxy workloads labeled `workspaces.platform.dev/app=proxy` and `workspaces.platform.dev/component=package-proxy`.
+
 Everything else:
 - requires a `NetworkGrant` approval
 - is scoped to a specific job’s pod labels
@@ -95,3 +98,7 @@ Recommended next steps:
 - sign images (cosign) and enforce verification at admission
 - route dependency downloads through internal proxies/mirrors
 - use Nix flake locking for toolchain pinning
+
+## Optional Admission Policies
+
+`k8s/optional/agents-validatingadmissionpolicy.yaml` provides a built-in `ValidatingAdmissionPolicy` that denies non-conforming agent pods (host mounts, privileged flags, missing `runtimeClassName=kata`, etc). Keep it optional so clusters without this feature can still run the MVP.

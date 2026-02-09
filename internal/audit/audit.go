@@ -2,6 +2,7 @@ package audit
 
 import (
 	"bytes"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -38,6 +39,9 @@ type Config struct {
 	CheckpointEveryDuration time.Duration
 
 	FsyncOnCheckpoint bool
+
+	// Optional. When set, checkpoints include an HMAC-SHA256 signature.
+	HMACKey []byte
 }
 
 func NewFromEnv(component string) (Emitter, error) {
@@ -73,6 +77,15 @@ func NewFromEnv(component string) (Emitter, error) {
 
 		fsync := stringsTrimLower(getenv("AUDIT_FSYNC_ON_CHECKPOINT", "false")) == "true"
 
+		var hmacKey []byte
+		if raw := strings.TrimSpace(os.Getenv("AUDIT_HMAC_KEY")); raw != "" {
+			k, err := hex.DecodeString(raw)
+			if err != nil || len(k) < 16 {
+				return nil, errors.New("AUDIT_HMAC_KEY must be a hex-encoded key (recommend >=16 bytes)")
+			}
+			hmacKey = k
+		}
+
 		return newFileEmitter(Config{
 			Sink:                    sink,
 			Stream:                  stream,
@@ -80,6 +93,7 @@ func NewFromEnv(component string) (Emitter, error) {
 			CheckpointEveryN:        checkEveryN,
 			CheckpointEveryDuration: checkEveryDur,
 			FsyncOnCheckpoint:       fsync,
+			HMACKey:                 hmacKey,
 		}, component)
 	default:
 		return nil, fmt.Errorf("unknown AUDIT_SINK %q (expected stdout|file)", sink)
@@ -120,6 +134,7 @@ type fileEmitter struct {
 	checkEveryN   int64
 	checkEveryDur time.Duration
 	fsync         bool
+	hmacKey       []byte
 
 	mu sync.Mutex
 
@@ -147,6 +162,7 @@ type checkpointRecord struct {
 	File      string `json:"file"`
 	Seq       int64  `json:"seq"`
 	Hash      string `json:"hash"`
+	Sig       string `json:"sig,omitempty"`
 }
 
 func newFileEmitter(cfg Config, component string) (*fileEmitter, error) {
@@ -161,6 +177,7 @@ func newFileEmitter(cfg Config, component string) (*fileEmitter, error) {
 		checkEveryN:   cfg.CheckpointEveryN,
 		checkEveryDur: cfg.CheckpointEveryDuration,
 		fsync:         cfg.FsyncOnCheckpoint,
+		hmacKey:       cfg.HMACKey,
 	}
 
 	// Open today's files and seed chain state.
@@ -240,6 +257,14 @@ func (e *fileEmitter) writeCheckpointLocked(now time.Time) error {
 		File:      filepath.Base(e.eventsF.Name()),
 		Seq:       e.seq,
 		Hash:      hex.EncodeToString(e.prevHash[:]),
+	}
+	if len(e.hmacKey) != 0 {
+		// Sign a stable string form of the checkpoint. (This is not intended to be
+		// perfect cryptographic provenance; it's an MVP step before Vault transit.)
+		msg := fmt.Sprintf("%s|%s|%s|%d|%s|%s", cp.Component, cp.Stream, cp.File, cp.Seq, cp.Hash, cp.TS)
+		mac := hmac.New(sha256.New, e.hmacKey)
+		_, _ = mac.Write([]byte(msg))
+		cp.Sig = hex.EncodeToString(mac.Sum(nil))
 	}
 	b, err := json.Marshal(cp)
 	if err != nil {

@@ -272,17 +272,20 @@ func (s *server) handleGitHubOpenPR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.requireJobOrAdmin(r, ""); err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
-		return
-	}
-
 	// Cap body size: patches can be large, but we don't want unbounded memory usage.
 	r.Body = http.MaxBytesReader(w, r.Body, 5<<20) // 5 MiB
 
 	var req githubOpenPRRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "bad_json"})
+		return
+	}
+	if strings.TrimSpace(req.Repo) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "repo_required"})
+		return
+	}
+	if err := s.requireRepoWrite(r.Context(), r, req.Repo); err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
 		return
 	}
 

@@ -1,0 +1,58 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: workspaces-agents-pod-hardening
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: agents
+  validations:
+    - expression: "object.metadata.labels['workspaces.platform.dev/app'] != 'agent' || (has(object.spec.automountServiceAccountToken) && object.spec.automountServiceAccountToken == false)"
+      message: "agent pods must set spec.automountServiceAccountToken=false"
+    - expression: "object.metadata.labels['workspaces.platform.dev/app'] != 'agent' || (!has(object.spec.hostNetwork) || object.spec.hostNetwork == false) && (!has(object.spec.hostPID) || object.spec.hostPID == false) && (!has(object.spec.hostIPC) || object.spec.hostIPC == false)"
+      message: "agent pods must not use hostNetwork/hostPID/hostIPC"
+    - expression: "object.metadata.labels['workspaces.platform.dev/app'] != 'agent' || !object.spec.volumes.exists(v, has(v.hostPath))"
+      message: "agent pods must not use hostPath volumes"
+    - expression: "object.metadata.labels['workspaces.platform.dev/app'] != 'agent' || (has(object.spec.runtimeClassName) && object.spec.runtimeClassName == 'kata')"
+      message: "agent pods must run with runtimeClassName=kata"
+    - expression: |
+        object.metadata.labels['workspaces.platform.dev/app'] != 'agent' ||
+        (
+          object.spec.containers.all(c,
+            has(c.securityContext) &&
+            (!has(c.securityContext.privileged) || c.securityContext.privileged == false) &&
+            has(c.securityContext.allowPrivilegeEscalation) && c.securityContext.allowPrivilegeEscalation == false &&
+            has(c.securityContext.runAsNonRoot) && c.securityContext.runAsNonRoot == true &&
+            has(c.securityContext.readOnlyRootFilesystem) && c.securityContext.readOnlyRootFilesystem == true &&
+            has(c.securityContext.capabilities) &&
+            has(c.securityContext.capabilities.drop) &&
+            c.securityContext.capabilities.drop.exists(d, d == 'ALL')
+          ) &&
+          (!has(object.spec.initContainers) || object.spec.initContainers.all(c,
+            has(c.securityContext) &&
+            (!has(c.securityContext.privileged) || c.securityContext.privileged == false) &&
+            has(c.securityContext.allowPrivilegeEscalation) && c.securityContext.allowPrivilegeEscalation == false &&
+            has(c.securityContext.runAsNonRoot) && c.securityContext.runAsNonRoot == true &&
+            has(c.securityContext.readOnlyRootFilesystem) && c.securityContext.readOnlyRootFilesystem == true &&
+            has(c.securityContext.capabilities) &&
+            has(c.securityContext.capabilities.drop) &&
+            c.securityContext.capabilities.drop.exists(d, d == 'ALL')
+          ))
+        )
+      message: "agent pods must be non-root, non-privileged, drop ALL capabilities, disable privilege escalation, and use read-only root filesystems"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: workspaces-agents-pod-hardening
+spec:
+  policyName: workspaces-agents-pod-hardening
+  validationActions: [Deny]
+

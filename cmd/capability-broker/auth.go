@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -8,6 +9,9 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	workspacesv1alpha1 "workspaces-platform/api/v1alpha1"
 )
 
 type jobIdentity struct {
@@ -91,6 +95,41 @@ func (s *server) requireJobOrAdmin(r *http.Request, requiredJobName string) erro
 	}
 	if strings.TrimSpace(requiredJobName) != "" && id.Name != strings.TrimSpace(requiredJobName) {
 		return errors.New("job token does not match agent job")
+	}
+	return nil
+}
+
+// requireRepoWrite allows admin callers or a job token bound to an AgentJob that
+// is explicitly associated with the requested repo (PR-scoped workflow).
+func (s *server) requireRepoWrite(ctx context.Context, r *http.Request, repo string) error {
+	// Admin token is a superset.
+	if s.adminToken != "" {
+		if strings.TrimSpace(r.Header.Get("X-Broker-Admin-Token")) == s.adminToken {
+			return nil
+		}
+	}
+
+	id, err := s.parseJobToken(r)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(id.Namespace) != "agents" {
+		return errors.New("job token namespace not allowed")
+	}
+
+	var aj workspacesv1alpha1.AgentJob
+	if err := s.k8s.Get(ctx, client.ObjectKey{Namespace: id.Namespace, Name: id.Name}, &aj); err != nil {
+		return errors.New("unknown agent job")
+	}
+	if aj.Annotations == nil {
+		return errors.New("agent job not authorized for repo writes")
+	}
+	expectedRepo := strings.ToLower(strings.TrimSpace(aj.Annotations["workspaces.platform.dev/github-repo"]))
+	if expectedRepo == "" {
+		return errors.New("agent job not authorized for repo writes")
+	}
+	if strings.ToLower(strings.TrimSpace(repo)) != expectedRepo {
+		return errors.New("repo mismatch for job token")
 	}
 	return nil
 }

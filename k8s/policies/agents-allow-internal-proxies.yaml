@@ -1,0 +1,26 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: agents-allow-internal-proxies
+  namespace: agents
+spec:
+  endpointSelector:
+    matchLabels:
+      workspaces.platform.dev/app: agent
+  egress:
+    # Prefer internal mirrors/proxies over direct public internet egress for agents.
+    # Label your proxy workloads in workspaces-system with:
+    #   workspaces.platform.dev/app: proxy
+    #   workspaces.platform.dev/component: package-proxy
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: workspaces-system
+            workspaces.platform.dev/app: proxy
+            workspaces.platform.dev/component: package-proxy
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "80"
+              protocol: TCP
+
