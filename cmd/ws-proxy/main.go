@@ -46,7 +46,7 @@ func main() {
 	flag.StringVar(&namespace, "namespace", "", "Namespace override (otherwise derived from host)")
 	flag.StringVar(&serviceName, "service", "", "Service override (otherwise derived from host)")
 	flag.IntVar(&targetPort, "target-port", 0, "Override remote pod port (otherwise derived from Service)")
-	flag.DurationVar(&timeout, "timeout", 45*time.Second, "Overall timeout for establishing the proxy")
+	flag.DurationVar(&timeout, "timeout", 45*time.Second, "Setup timeout for establishing the proxy (does not limit session duration)")
 	flag.BoolVar(&verbose, "v", false, "Verbose logging (to stderr)")
 	flag.Parse()
 
@@ -77,7 +77,7 @@ func main() {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	setupCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	cfg, err := loadKubeConfig(kubeconfig, kubeContext)
@@ -92,7 +92,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	svc, err := clientset.CoreV1().Services(namespace).Get(ctx, serviceName, metav1.GetOptions{})
+	svc, err := clientset.CoreV1().Services(namespace).Get(setupCtx, serviceName, metav1.GetOptions{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "get service %s/%s: %v\n", namespace, serviceName, err)
 		os.Exit(1)
@@ -103,7 +103,7 @@ func main() {
 	}
 
 	selector := labels.SelectorFromSet(svc.Spec.Selector)
-	podList, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector.String()})
+	podList, err := clientset.CoreV1().Pods(namespace).List(setupCtx, metav1.ListOptions{LabelSelector: selector.String()})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "list pods for %s/%s: %v\n", namespace, serviceName, err)
 		os.Exit(1)
@@ -116,7 +116,14 @@ func main() {
 	}
 
 	// Best-effort: heartbeat the Desktop last-active timestamp (used for autosuspend).
-	_ = touchDesktop(ctx, cfg, namespace, serviceName, svc)
+	dyn, _ := dynamic.NewForConfig(cfg)
+	_ = touchDesktop(setupCtx, dyn, namespace, serviceName, svc)
+	heartbeatEvery := 5 * time.Minute
+	if raw := strings.TrimSpace(os.Getenv("WORKSPACES_HEARTBEAT_SECONDS")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			heartbeatEvery = time.Duration(n) * time.Second
+		}
+	}
 
 	remotePort := targetPort
 	if remotePort == 0 {
@@ -132,13 +139,22 @@ func main() {
 		fmt.Fprintf(os.Stderr, "ws-proxy: service=%s/%s pod=%s remotePort=%d\n", namespace, serviceName, pod.Name, remotePort)
 	}
 
-	if err := proxyOnce(ctx, cfg, clientset, namespace, pod.Name, remotePort); err != nil {
+	heartbeatFn := func() {
+		// Don't let heartbeats stall the session.
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = touchDesktop(ctx, dyn, namespace, serviceName, svc)
+	}
+	if err := proxyOnce(setupCtx, cfg, clientset, namespace, pod.Name, remotePort, heartbeatEvery, heartbeatFn); err != nil {
 		fmt.Fprintf(os.Stderr, "proxy failed: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func touchDesktop(ctx context.Context, cfg *rest.Config, namespace, serviceName string, svc *corev1.Service) error {
+func touchDesktop(ctx context.Context, dyn dynamic.Interface, namespace, serviceName string, svc *corev1.Service) error {
+	if dyn == nil {
+		return nil
+	}
 	deskName := ""
 	if svc != nil && svc.Labels != nil {
 		deskName = strings.TrimSpace(svc.Labels["workspaces.platform.dev/desktop"])
@@ -156,10 +172,6 @@ func touchDesktop(ctx context.Context, cfg *rest.Config, namespace, serviceName 
 		return fmt.Errorf("unable to resolve desktop name from service %q", serviceName)
 	}
 
-	dyn, err := dynamic.NewForConfig(cfg)
-	if err != nil {
-		return err
-	}
 	gvr := schema.GroupVersionResource{Group: "workspaces.platform.dev", Version: "v1alpha1", Resource: "desktops"}
 
 	ts := time.Now().UTC().Format(time.RFC3339Nano)
@@ -171,7 +183,7 @@ func touchDesktop(ctx context.Context, cfg *rest.Config, namespace, serviceName 
 		},
 	}
 	b, _ := json.Marshal(patchObj)
-	_, err = dyn.Resource(gvr).Namespace(namespace).Patch(ctx, deskName, types.MergePatchType, b, metav1.PatchOptions{})
+	_, err := dyn.Resource(gvr).Namespace(namespace).Patch(ctx, deskName, types.MergePatchType, b, metav1.PatchOptions{})
 	return err
 }
 
@@ -273,7 +285,7 @@ func resolveServiceTargetPort(svc *corev1.Service, servicePort int32, pod *corev
 	return 0, fmt.Errorf("service targetPort %q not found on pod %s", name, pod.Name)
 }
 
-func proxyOnce(ctx context.Context, cfg *rest.Config, clientset *kubernetes.Clientset, namespace, podName string, remotePort int) error {
+func proxyOnce(setupCtx context.Context, cfg *rest.Config, clientset *kubernetes.Clientset, namespace, podName string, remotePort int, heartbeatEvery time.Duration, heartbeat func()) error {
 	transport, upgrader, err := spdy.RoundTripperFor(cfg)
 	if err != nil {
 		return err
@@ -311,10 +323,10 @@ func proxyOnce(ctx context.Context, cfg *rest.Config, clientset *kubernetes.Clie
 			return fmt.Errorf("port-forward unexpectedly exited")
 		}
 		return err
-	case <-ctx.Done():
+	case <-setupCtx.Done():
 		close(stopCh)
 		pf.Close()
-		return ctx.Err()
+		return setupCtx.Err()
 	}
 
 	fps, err := pf.GetPorts()
@@ -329,13 +341,31 @@ func proxyOnce(ctx context.Context, cfg *rest.Config, clientset *kubernetes.Clie
 		return fmt.Errorf("unexpected forwarded ports: %+v", fps)
 	}
 
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", fmt.Sprintf("127.0.0.1:%d", fps[0].Local))
+	conn, err := (&net.Dialer{}).DialContext(setupCtx, "tcp", fmt.Sprintf("127.0.0.1:%d", fps[0].Local))
 	if err != nil {
 		close(stopCh)
 		pf.Close()
 		return err
 	}
 	defer func() { _ = conn.Close() }()
+
+	var stopHeartbeat func()
+	if heartbeatEvery > 0 && heartbeat != nil {
+		hbCtx, hbCancel := context.WithCancel(context.Background())
+		stopHeartbeat = hbCancel
+		go func() {
+			t := time.NewTicker(heartbeatEvery)
+			defer t.Stop()
+			for {
+				select {
+				case <-hbCtx.Done():
+					return
+				case <-t.C:
+					heartbeat()
+				}
+			}
+		}()
+	}
 
 	copyErr := make(chan error, 2)
 	go func() {
@@ -351,9 +381,10 @@ func proxyOnce(ctx context.Context, cfg *rest.Config, clientset *kubernetes.Clie
 	}()
 
 	// Wait for either direction to finish; then tear everything down.
-	select {
-	case <-ctx.Done():
-	case <-copyErr:
+	<-copyErr
+
+	if stopHeartbeat != nil {
+		stopHeartbeat()
 	}
 
 	close(stopCh)

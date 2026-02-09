@@ -29,12 +29,16 @@ Host desk-jonathan
 
 `ws-proxy` parses the host as `<service>.<namespace>...`, finds the Service selector, picks a ready pod, then port-forwards to the pod and proxies bytes.
 
-On each successful connection, `ws-proxy` also updates the Desktop annotation `workspaces.platform.dev/last-active-at` (used for autosuspend).
+On each connection (and periodically while the session is open), `ws-proxy` updates the Desktop annotation `workspaces.platform.dev/last-active-at` (used for autosuspend).
+The heartbeat interval is configurable via `WORKSPACES_HEARTBEAT_SECONDS` (default: 300s).
 
 Gateway kubeconfig RBAC needs (minimum):
 - `get` Services in the desktop namespaces
 - `list` Pods in the desktop namespaces
 - `create` on `pods/portforward` in the desktop namespaces
+- `patch` on `workspaces.platform.dev/desktops` in the desktop namespaces (to write last-active annotation)
+
+Example RBAC: `k8s/examples/gateway-rbac.yaml`.
 
 ## Privileged Mode (Optional): Gateway Can Route To `ClusterIP`
 

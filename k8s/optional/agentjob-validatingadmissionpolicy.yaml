@@ -1,0 +1,28 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: workspaces-agentjob-guardrails
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["workspaces.platform.dev"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["agentjobs"]
+  validations:
+    # Strong recommendation for reproducibility + supply chain control.
+    - expression: "object.spec.image.matches('.*@sha256:[0-9a-fA-F]{64}$')"
+      message: "AgentJob spec.image must be pinned by digest (image@sha256:...)"
+    # Agent isolation: enforce Kata runtime when explicitly set.
+    - expression: "!has(object.spec.runtimeClassName) || object.spec.runtimeClassName == 'kata'"
+      message: "AgentJob spec.runtimeClassName must be 'kata' (or omit to use the operator default)"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: workspaces-agentjob-guardrails
+spec:
+  policyName: workspaces-agentjob-guardrails
+  validationActions: [Deny]
+

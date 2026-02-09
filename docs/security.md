@@ -101,4 +101,7 @@ Recommended next steps:
 
 ## Optional Admission Policies
 
-`k8s/optional/agents-validatingadmissionpolicy.yaml` provides a built-in `ValidatingAdmissionPolicy` that denies non-conforming agent pods (host mounts, privileged flags, missing `runtimeClassName=kata`, etc). Keep it optional so clusters without this feature can still run the MVP.
+These manifests are optional so clusters without this feature can still run the MVP.
+
+- `k8s/optional/agents-validatingadmissionpolicy.yaml`: denies non-conforming **agent Pods** (host mounts, privileged flags, missing `runtimeClassName=kata`, etc).
+- `k8s/optional/agentjob-validatingadmissionpolicy.yaml`: enforces **AgentJob CR** guardrails (pinned image digests, runtime class constraints).

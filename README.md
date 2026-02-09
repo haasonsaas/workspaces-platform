@@ -19,6 +19,7 @@ Docs:
 - `docs/access.md`
 - `docs/security.md`
 - `docs/audit.md`
+- `docs/cost.md`
 - `docs/github.md`
 - `docs/storage.md`
 - `docs/wsctl.md`
