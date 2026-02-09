@@ -30,6 +30,12 @@ spec:
               value: "5"
             - name: DIAL_TIMEOUT_SECONDS
               value: "10"
+            - name: DNS_TIMEOUT_SECONDS
+              value: "2"
+            # Safety default: prevent the proxy from dialing private/link-local IPs
+            # (mitigates DNS rebinding turning the proxy into an internal bridge).
+            - name: ALLOW_PRIVATE_IPS
+              value: "false"
             # Optional: audit config (see docs/audit.md).
             - name: AUDIT_SINK
               value: "stdout"
@@ -72,4 +78,3 @@ spec:
     - name: http
       port: 8080
       targetPort: 8080
-

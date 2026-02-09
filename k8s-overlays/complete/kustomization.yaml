@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # Base + audit overlay.
+  - ../audit
+
+  # Optional bundles.
+  - ../../k8s/optional/storage
+  - ../../k8s/optional/proxies
+  - ../../k8s/optional/hardened

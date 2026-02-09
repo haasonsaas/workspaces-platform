@@ -1,0 +1,62 @@
+# Kustomize Overlays
+
+This repo keeps the MVP base (`k8s/`) small and then layers optional features via `k8s-overlays/`.
+
+## Base
+
+Applies:
+- CRDs + namespaces
+- operator + capability-broker + egress-proxy
+- baseline Cilium policies for agents (default-deny + allow in-cluster proxies)
+
+```bash
+kubectl apply -k k8s
+```
+
+## Hardened
+
+Adds:
+- quotas for `agents` and `desktops`
+- optional CEL admission guardrails (`ValidatingAdmissionPolicy`)
+
+```bash
+kubectl apply -k k8s-overlays/hardened
+```
+
+Notes:
+- `ValidatingAdmissionPolicy` requires a cluster version that supports `admissionregistration.k8s.io/v1`.
+- If your cluster doesn't support it, use `k8s/` and apply quotas only.
+
+## Proxies
+
+Adds common internal mirrors/caches:
+- Attic (Nix)
+- Verdaccio (npm)
+- devpi (PyPI)
+- Cargo proxy
+- Athens (Go)
+- Docker Registry pull-through cache
+- Maven cache
+
+```bash
+kubectl apply -k k8s-overlays/proxies
+```
+
+## Complete ("All Of The Things")
+
+Bundles:
+- base
+- audit overlay
+- proxies
+- quotas
+- admission guardrails
+
+```bash
+kubectl apply -k k8s-overlays/complete
+```
+
+This is the fastest path to a "secure-by-default" dev cluster, but it does assume:
+- Cilium is installed (network policy enforcement)
+- snapshot CRDs/controller exist if you apply the Longhorn `VolumeSnapshotClass` example
+- your cluster supports `ValidatingAdmissionPolicy` for the admission layer
+

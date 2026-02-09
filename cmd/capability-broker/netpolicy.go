@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	workspacesv1alpha1 "workspaces-platform/api/v1alpha1"
+	"workspaces-platform/internal/netutil"
 )
 
 // networkGrantPolicy enforces "proxy-first" egress defaults at the broker layer.
@@ -158,7 +159,11 @@ func (p networkGrantPolicy) validateNonAdminNetworkGrant(spec workspacesv1alpha1
 	publicRequested := false
 	egressHosts := map[string]struct{}{}
 	for i, r := range spec.Egress {
-		h := strings.ToLower(strings.TrimSpace(r.Host))
+		raw := strings.TrimSpace(r.Host)
+		if err := netutil.ValidateExactHostname(raw); err != nil {
+			return fmt.Errorf("egress[%d].host %q is invalid: %w", i, raw, err)
+		}
+		h := strings.ToLower(raw)
 		if h == "" {
 			return fmt.Errorf("egress[%d].host is empty", i)
 		}
@@ -201,7 +206,14 @@ func (p networkGrantPolicy) validateNonAdminNetworkGrant(spec workspacesv1alpha1
 	}
 
 	for i, host := range spec.DNSAllow {
-		h := strings.ToLower(strings.TrimSpace(host))
+		raw := strings.TrimSpace(host)
+		if raw == "" {
+			return fmt.Errorf("dnsAllow[%d] is empty", i)
+		}
+		if err := netutil.ValidateExactHostname(raw); err != nil {
+			return fmt.Errorf("dnsAllow[%d] %q is invalid: %w", i, raw, err)
+		}
+		h := strings.ToLower(raw)
 		if h == "" {
 			return fmt.Errorf("dnsAllow[%d] is empty", i)
 		}

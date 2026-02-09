@@ -111,6 +111,8 @@ Core:
 - `LISTEN_ADDR` (default `:8080`)
 - `REFRESH_SECONDS` (default `5`): how often to refresh pod/grant caches.
 - `DIAL_TIMEOUT_SECONDS` (default `10`)
+- `DNS_TIMEOUT_SECONDS` (default `2`): max time spent resolving destination hostnames per CONNECT.
+- `ALLOW_PRIVATE_IPS` (default `false`): when `false`, the proxy refuses to dial destinations that resolve to private/link-local/CGNAT IPs (DNS rebinding defense).
 
 Audit:
 - uses the same `AUDIT_*` env vars as other components (`internal/audit`)

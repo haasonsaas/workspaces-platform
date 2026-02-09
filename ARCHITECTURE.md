@@ -108,7 +108,7 @@ DNS hardening:
 Proxy-first guardrail:
 - The capability-broker rejects/blocks approving public internet `NetworkGrant`s by default unless the hostnames are explicitly allowlisted (`BROKER_NETWORK_*`).
 - This prevents “PR comment approves arbitrary internet” drift; admin approvals remain the explicit escape hatch.
-- For public egress, prefer `NetworkGrant.spec.policyMode=PROXY_CONNECT` so pods have no direct internet egress; egress is mediated by `egress-proxy` (see `docs/egress-proxy.md`).
+- For public egress, prefer `NetworkGrant.spec.policyMode=PROXY_CONNECT` so pods have no direct internet egress; egress is mediated by `egress-proxy`, which refuses to dial private/link-local/CGNAT IPs by default (DNS rebinding defense). See `docs/egress-proxy.md`.
 
 ## Core Control Plane Components
 

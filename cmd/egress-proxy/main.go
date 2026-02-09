@@ -23,6 +23,7 @@ import (
 
 	workspacesv1alpha1 "workspaces-platform/api/v1alpha1"
 	auditpkg "workspaces-platform/internal/audit"
+	"workspaces-platform/internal/netutil"
 )
 
 const (
@@ -58,7 +59,7 @@ func (p *podIndex) setAll(m map[string]podInfo) {
 type allowSet map[string]map[int32]struct{} // host -> ports
 
 func (a allowSet) add(host string, port int32) {
-	host = strings.ToLower(strings.TrimSpace(host))
+	host = netutil.NormalizeHostname(host)
 	if host == "" || port <= 0 || port > 65535 {
 		return
 	}
@@ -71,7 +72,7 @@ func (a allowSet) add(host string, port int32) {
 }
 
 func (a allowSet) allows(host string, port int32) bool {
-	host = strings.ToLower(strings.TrimSpace(host))
+	host = netutil.NormalizeHostname(host)
 	if host == "" || port <= 0 || port > 65535 {
 		return false
 	}
@@ -141,17 +142,28 @@ type server struct {
 	grants *grantIndex
 
 	dialTimeout time.Duration
+	dnsTimeout  time.Duration
+
+	// allowPrivateIPs controls whether CONNECT destinations may resolve to
+	// private/link-local IPs. Default is false for safety (prevents proxy from
+	// becoming a bridge into internal networks via DNS rebinding).
+	allowPrivateIPs bool
 }
 
 func main() {
 	listenAddr := getenv("LISTEN_ADDR", ":8080")
 	refreshSeconds := intFromEnv("REFRESH_SECONDS", 5)
 	dialTimeoutSeconds := intFromEnv("DIAL_TIMEOUT_SECONDS", 10)
+	dnsTimeoutSeconds := intFromEnv("DNS_TIMEOUT_SECONDS", 2)
+	allowPrivateIPs := strings.EqualFold(strings.TrimSpace(getenv("ALLOW_PRIVATE_IPS", "false")), "true")
 	if refreshSeconds <= 0 {
 		refreshSeconds = 5
 	}
 	if dialTimeoutSeconds <= 0 {
 		dialTimeoutSeconds = 10
+	}
+	if dnsTimeoutSeconds <= 0 {
+		dnsTimeoutSeconds = 2
 	}
 
 	auditEmitter, err := auditpkg.NewFromEnv("egress-proxy")
@@ -176,6 +188,9 @@ func main() {
 		pods:        &podIndex{byIP: map[string]podInfo{}},
 		grants:      &grantIndex{byJob: map[string]allowSet{}, selectors: nil},
 		dialTimeout: time.Duration(dialTimeoutSeconds) * time.Second,
+		dnsTimeout:  time.Duration(dnsTimeoutSeconds) * time.Second,
+		// Default is strict: do not allow proxy to dial private IPs.
+		allowPrivateIPs: allowPrivateIPs,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -270,9 +285,19 @@ func (s *server) refreshGrantsOnce(ctx context.Context) {
 			continue
 		}
 
+		mode := ng.Spec.PolicyMode
+		if mode == "" {
+			mode = workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN
+		}
+		// The proxy only enforces PROXY_CONNECT grants. STRICT_FQDN grants are
+		// enforced by Cilium directly and should not implicitly become proxy grants.
+		if mode != workspacesv1alpha1.NetworkGrantPolicyModeProxyConnect {
+			continue
+		}
+
 		allow := allowSet{}
 		for _, r := range ng.Spec.Egress {
-			host := strings.ToLower(strings.TrimSpace(r.Host))
+			host := netutil.NormalizeHostname(r.Host)
 			if host == "" {
 				continue
 			}
@@ -413,6 +438,20 @@ func (s *server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		writeHTTPError(w, http.StatusBadRequest, "bad destination")
 		return
 	}
+	host = netutil.NormalizeHostname(host)
+	if err := validateConnectHost(host); err != nil {
+		s.audit.Emit("egressproxy.connect_denied", map[string]any{
+			"remote_ip": remoteIP,
+			"pod":       fmt.Sprintf("%s/%s", pod.Namespace, pod.Name),
+			"agentjob":  job,
+			"dest_host": host,
+			"dest_port": port,
+			"error":     "invalid_host",
+			"detail":    err.Error(),
+		})
+		writeHTTPError(w, http.StatusBadRequest, "bad destination")
+		return
+	}
 
 	if !s.grants.allows(job, pod.Labels, host, port) {
 		// Best-effort: refresh once to avoid "wait for next tick" UX.
@@ -435,7 +474,27 @@ func (s *server) handleProxy(w http.ResponseWriter, r *http.Request) {
 	dialCtx, cancel := context.WithTimeout(ctx, s.dialTimeout)
 	defer cancel()
 	var d net.Dialer
-	dstConn, err := d.DialContext(dialCtx, "tcp", net.JoinHostPort(host, fmt.Sprintf("%d", port)))
+
+	dialHost := host
+	if !s.allowPrivateIPs {
+		ip, err := s.resolvePublicIP(dialCtx, host)
+		if err != nil {
+			s.audit.Emit("egressproxy.connect_denied", map[string]any{
+				"remote_ip": remoteIP,
+				"pod":       fmt.Sprintf("%s/%s", pod.Namespace, pod.Name),
+				"agentjob":  job,
+				"dest_host": host,
+				"dest_port": port,
+				"error":     "dest_not_public",
+				"detail":    err.Error(),
+			})
+			writeHTTPError(w, http.StatusForbidden, "destination not allowed")
+			return
+		}
+		dialHost = ip.String()
+	}
+
+	dstConn, err := d.DialContext(dialCtx, "tcp", net.JoinHostPort(dialHost, fmt.Sprintf("%d", port)))
 	if err != nil {
 		s.audit.Emit("egressproxy.connect_failed", map[string]any{
 			"remote_ip": remoteIP,
@@ -494,6 +553,74 @@ func (s *server) handleProxy(w http.ResponseWriter, r *http.Request) {
 		"up_bytes":    upBytes,
 		"down_bytes":  downBytes,
 	})
+}
+
+func validateConnectHost(host string) error {
+	// Allow clients to use absolute FQDN form ("example.com.") by normalizing
+	// before validation.
+	host = netutil.NormalizeHostname(host)
+	return netutil.ValidateExactHostname(host)
+}
+
+func isCGNAT(ip net.IP) bool {
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return false
+	}
+	// 100.64.0.0/10 (Carrier-grade NAT): treat as non-public for safety.
+	return ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127
+}
+
+func isAllowedDialIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	if !ip.IsGlobalUnicast() {
+		return false
+	}
+	if ip.IsPrivate() {
+		return false
+	}
+	if ip.IsLoopback() || ip.IsUnspecified() || ip.IsMulticast() {
+		return false
+	}
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return false
+	}
+	if isCGNAT(ip) {
+		return false
+	}
+	return true
+}
+
+func (s *server) resolvePublicIP(ctx context.Context, host string) (net.IP, error) {
+	ctx, cancel := context.WithTimeout(ctx, s.dnsTimeout)
+	defer cancel()
+
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+
+	var firstV6 net.IP
+	for _, a := range addrs {
+		ip := a.IP
+		if !isAllowedDialIP(ip) {
+			continue
+		}
+		// Prefer IPv4 when available; it tends to be more predictable in
+		// on-prem environments (dual-stack can be uneven early on).
+		if ip.To4() != nil {
+			return ip, nil
+		}
+		if firstV6 == nil {
+			firstV6 = ip
+		}
+	}
+	if firstV6 != nil {
+		return firstV6, nil
+	}
+	return nil, fmt.Errorf("no public A/AAAA records")
 }
 
 func parseHostPort(dest string) (string, int32, error) {

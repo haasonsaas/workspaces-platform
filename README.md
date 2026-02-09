@@ -13,10 +13,12 @@ Repo layout:
 - `cmd/egress-proxy`: HTTP CONNECT proxy that enforces `NetworkGrant` allowlists (proxy-first egress).
 - `api/v1alpha1`: CRD Go types (Desktop, AgentJob, NetworkGrant).
 - `k8s/`: CRDs + example manifests (Cilium policies, operator deploy).
+- `k8s-overlays/`: Kustomize overlays that bundle optional features (audit, proxies, admission guardrails).
 
 Docs:
 - `ARCHITECTURE.md`
 - `docs/mvp.md`
+- `docs/overlays.md`
 - `docs/access.md`
 - `docs/security.md`
 - `docs/audit.md`
@@ -27,6 +29,7 @@ Docs:
 - `docs/reproducibility.md`
 - `docs/egress-proxy.md`
 - `docs/wsctl.md`
+- `docs/troubleshooting.md`
 
 This repo is an MVP that compiles and deploys manifests, but you still need to wire:
 - image build/publish for operator/broker/desktop/agent images

@@ -26,7 +26,8 @@ const (
 
 type NetworkGrantEgressRule struct {
 	// Host is a DNS name allowed for egress (Cilium FQDN policy).
-	// MVP: exact match only (no wildcards).
+	// MVP: exact match only (no wildcards), hostnames only (no scheme/path/port),
+	// and no IP literals.
 	Host string `json:"host"`
 
 	// Ports are allowed TCP ports. If empty, defaults to [443].
@@ -74,7 +75,7 @@ type NetworkGrantSpec struct {
 	// without granting direct egress to those names. This is useful to allow
 	// CNAME chains while keeping egress constrained by `spec.egress`.
 	//
-	// MVP: exact match only (no wildcards).
+	// MVP: exact match only (no wildcards), and no IP literals.
 	DNSAllow []string `json:"dnsAllow,omitempty"`
 
 	// AllowNon443 allows non-443 ports in egress rules. Defaults to false.

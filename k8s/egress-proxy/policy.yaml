@@ -1,0 +1,19 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: egress-proxy-ingress
+  namespace: workspaces-system
+spec:
+  endpointSelector:
+    matchLabels:
+      app: egress-proxy
+  ingress:
+    # Allow kubelet health probes (node -> pod).
+    - fromEntities:
+        - host
+    # Allow only agent pods to use the proxy.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: agents
+            workspaces.platform.dev/app: agent
+

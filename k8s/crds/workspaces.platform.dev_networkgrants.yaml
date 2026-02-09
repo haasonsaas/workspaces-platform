@@ -70,7 +70,7 @@ spec:
                   without granting direct egress to those names. This is useful to allow
                   CNAME chains while keeping egress constrained by `spec.egress`.
 
-                  MVP: exact match only (no wildcards).
+                  MVP: exact match only (no wildcards), and no IP literals.
                 items:
                   type: string
                 type: array
@@ -81,7 +81,8 @@ spec:
                     host:
                       description: |-
                         Host is a DNS name allowed for egress (Cilium FQDN policy).
-                        MVP: exact match only (no wildcards).
+                        MVP: exact match only (no wildcards), hostnames only (no scheme/path/port),
+                        and no IP literals.
                       type: string
                     ports:
                       description: Ports are allowed TCP ports. If empty, defaults

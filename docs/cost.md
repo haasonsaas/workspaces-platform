@@ -32,18 +32,17 @@ To force state:
 ## 3) Kubernetes Quotas + Default Limits (Optional)
 
 Apply namespace-level quotas/limits when you want hard ceilings:
-- Agents: `k8s/optional/agents-quotas.yaml`
-- Desktops: `k8s/optional/desktops-quotas.yaml`
+- Agents: `k8s/optional/hardened/agents-quotas.yaml`
+- Desktops: `k8s/optional/hardened/desktops-quotas.yaml`
 
 These are intentionally **not** installed by default because every cluster size differs.
 
 Example:
 ```bash
-kubectl apply -f k8s/optional/agents-quotas.yaml
-kubectl apply -f k8s/optional/desktops-quotas.yaml
+kubectl apply -f k8s/optional/hardened/agents-quotas.yaml
+kubectl apply -f k8s/optional/hardened/desktops-quotas.yaml
 ```
 
 Notes:
 - `LimitRange` sets default requests/limits when a workload omits them.
 - `ResourceQuota` sets hard ceilings across the namespace (pods, CPU/memory totals, storage totals).
-

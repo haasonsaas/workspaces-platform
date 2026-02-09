@@ -28,6 +28,7 @@ import (
 	workspacesv1alpha1 "workspaces-platform/api/v1alpha1"
 	"workspaces-platform/internal/artifacts"
 	auditpkg "workspaces-platform/internal/audit"
+	"workspaces-platform/internal/netutil"
 	"workspaces-platform/internal/redact"
 )
 
@@ -215,6 +216,13 @@ func (s *server) handleCreateNetworkGrant(w http.ResponseWriter, r *http.Request
 	}
 	if req.Protocol == "" {
 		req.Protocol = workspacesv1alpha1.NetworkGrantProtocolTCP
+	}
+	if err := validateNetworkGrantSpecShape(req.Egress, req.DNSAllow, req.AllowNon443); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error":  "invalid_networkgrant",
+			"detail": err.Error(),
+		})
+		return
 	}
 
 	if req.PolicyMode == "" {
@@ -904,6 +912,40 @@ echo "No .workspaces/agent.sh found; nothing to do."
 	}
 
 	writeJSON(w, http.StatusCreated, aj)
+}
+
+func validateNetworkGrantSpecShape(egress []workspacesv1alpha1.NetworkGrantEgressRule, dnsAllow []string, allowNon443 bool) error {
+	for i, r := range egress {
+		host := strings.TrimSpace(r.Host)
+		if err := netutil.ValidateExactHostname(host); err != nil {
+			return fmt.Errorf("egress[%d].host %q is invalid: %w", i, host, err)
+		}
+
+		ports := r.Ports
+		if len(ports) == 0 {
+			ports = []int32{443}
+		}
+		for _, p := range ports {
+			if p <= 0 || p > 65535 {
+				return fmt.Errorf("egress[%d] has invalid port %d", i, p)
+			}
+			if !allowNon443 && p != 443 {
+				return fmt.Errorf("egress[%d] requests non-443 port %d but allowNon443 is false", i, p)
+			}
+		}
+	}
+
+	for i, host := range dnsAllow {
+		h := strings.TrimSpace(host)
+		if h == "" {
+			return fmt.Errorf("dnsAllow[%d] is empty", i)
+		}
+		if err := netutil.ValidateExactHostname(h); err != nil {
+			return fmt.Errorf("dnsAllow[%d] %q is invalid: %w", i, h, err)
+		}
+	}
+
+	return nil
 }
 
 func (s *server) isAdmin(r *http.Request) bool {

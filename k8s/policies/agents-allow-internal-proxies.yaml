@@ -27,7 +27,7 @@ spec:
               protocol: TCP
             - port: "80"
               protocol: TCP
-            # Common package proxy ports (examples in k8s/optional/).
+            # Common package proxy ports (examples in k8s/optional/proxies/).
             - port: "8080" # generic HTTP (cargo proxy, attic)
               protocol: TCP
             - port: "4873" # Verdaccio

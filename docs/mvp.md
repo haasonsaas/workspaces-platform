@@ -35,6 +35,13 @@ CRDs + namespaces + operator + broker + baseline policies:
 kubectl apply -k k8s
 ```
 
+If you want the full "all the things" bundle (audit + proxies + quotas + admission guardrails):
+```bash
+kubectl apply -k k8s-overlays/complete
+```
+
+See: `docs/overlays.md`.
+
 ## 3. Default-Deny Agents
 
 Apply baseline policies in the `agents` namespace:

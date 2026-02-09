@@ -21,7 +21,7 @@ driver: driver.longhorn.io
 deletionPolicy: Delete
 ```
 
-This repo includes an example manifest at `k8s/optional/longhorn-volumesnapshotclass.yaml`.
+This repo includes an example manifest at `k8s/optional/storage/longhorn-volumesnapshotclass.yaml`.
 
 ## HomeTemplate (Warm Start + Reset)
 

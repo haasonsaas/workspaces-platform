@@ -10,8 +10,8 @@ This platform is designed to be:
 For production, prefer `image@sha256:<digest>` everywhere (desktops, agents, control plane).
 
 Optional guardrails (Kubernetes ValidatingAdmissionPolicy):
-- `k8s/optional/agentjob-validatingadmissionpolicy.yaml` enforces `AgentJob.spec.image` is digest-pinned
-- `k8s/optional/desktop-validatingadmissionpolicy.yaml` enforces `Desktop.spec.image` is digest-pinned when explicitly set
+- `k8s/optional/hardened/agentjob-validatingadmissionpolicy.yaml` enforces `AgentJob.spec.image` is digest-pinned
+- `k8s/optional/hardened/desktop-validatingadmissionpolicy.yaml` enforces `Desktop.spec.image` is digest-pinned when explicitly set
 
 Operationally:
 - set broker default agent image (`k8s/broker/configmap.yaml` key `agent_default_image`) to a digest-pinned value
@@ -35,7 +35,7 @@ To avoid “cold internet builds” and make agents fast:
 - configure desktops/agents to use it as a substituter
 
 Optional example manifest:
-- `k8s/optional/nix-cache-attic.yaml` (monolithic Attic with local PVC storage; label-matched by `agents-allow-internal-proxies`)
+- `k8s/optional/proxies/nix-cache-attic.yaml` (monolithic Attic with local PVC storage; label-matched by `agents-allow-internal-proxies`)
 - `k8s/examples/attic-secrets.yaml` (JWT signing secret)
 
 Example Nix config snippet (conceptual):
@@ -58,12 +58,12 @@ This repo intentionally labels proxies using:
 So baseline agent policy can allow them without widening everything else.
 
 Optional example manifests:
-- `k8s/optional/package-proxy-verdaccio.yaml` (npm proxy/cache)
-- `k8s/optional/package-proxy-athens.yaml` (Go module proxy)
-- `k8s/optional/package-proxy-cargo.yaml` (Cargo sparse index + crate download proxy/cache)
-- `k8s/optional/package-proxy-devpi.yaml` (PyPI proxy/mirror via devpi)
-- `k8s/optional/package-proxy-maven.yaml` (Maven Central proxy/cache)
-- `k8s/optional/package-proxy-registry.yaml` (Docker Hub pull-through registry cache)
+- `k8s/optional/proxies/package-proxy-verdaccio.yaml` (npm proxy/cache)
+- `k8s/optional/proxies/package-proxy-athens.yaml` (Go module proxy)
+- `k8s/optional/proxies/package-proxy-cargo.yaml` (Cargo sparse index + crate download proxy/cache)
+- `k8s/optional/proxies/package-proxy-devpi.yaml` (PyPI proxy/mirror via devpi)
+- `k8s/optional/proxies/package-proxy-maven.yaml` (Maven Central proxy/cache)
+- `k8s/optional/proxies/package-proxy-registry.yaml` (Docker Hub pull-through registry cache)
 
 Example client config:
 - npm:

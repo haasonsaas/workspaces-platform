@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	workspacesv1alpha1 "workspaces-platform/api/v1alpha1"
+	"workspaces-platform/internal/netutil"
 )
 
 type NetworkGrantReconciler struct {
@@ -130,9 +131,31 @@ func (r *NetworkGrantReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// PROXY_CONNECT mode: do not create direct egress policy. The egress-proxy
-	// enforces the destination allowlist using this NetworkGrant.
+	// enforces the destination allowlist using this NetworkGrant. We still create
+	// DNS L7 allow rules for the approved hostnames so tools that resolve before
+	// CONNECT continue to work without broad DNS exfil surface.
 	if mode == workspacesv1alpha1.NetworkGrantPolicyModeProxyConnect {
-		_ = r.Delete(ctx, cnp) // clean up any previous STRICT_FQDN policy
+		egress := []any{}
+		if dnsRule := buildCiliumDNSAllowEgress(dnsNames); dnsRule != nil {
+			egress = []any{dnsRule}
+		}
+		spec := map[string]any{
+			"endpointSelector": map[string]any{
+				"matchLabels": matchLabels,
+			},
+			"egress": egress,
+		}
+
+		_, err := controllerutil.CreateOrUpdate(ctx, r.Client, cnp, func() error {
+			if err := unstructured.SetNestedField(cnp.Object, spec, "spec"); err != nil {
+				return err
+			}
+			return controllerutil.SetControllerReference(&grant, cnp, r.Scheme)
+		})
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
 		if !grant.Status.Active {
 			patch := client.MergeFrom(grant.DeepCopy())
 			grant.Status.Active = true
@@ -301,25 +324,7 @@ func validateAndResolveNetworkGrantMatchLabels(grant *workspacesv1alpha1.Network
 }
 
 func validateNetworkGrantHost(host string) error {
-	if strings.TrimSpace(host) == "" {
-		return fmt.Errorf("empty")
-	}
-	if strings.ContainsAny(host, " \t\r\n") {
-		return fmt.Errorf("contains whitespace")
-	}
-	if strings.Contains(host, "*") {
-		return fmt.Errorf("must be an exact FQDN (no wildcards)")
-	}
-	if strings.ContainsAny(host, "/:") {
-		return fmt.Errorf("must be a hostname only (no scheme/path/port)")
-	}
-	if strings.HasPrefix(host, ".") || strings.HasSuffix(host, ".") {
-		return fmt.Errorf("must not start or end with '.'")
-	}
-	if len(host) > 253 {
-		return fmt.Errorf("too long")
-	}
-	return nil
+	return netutil.ValidateExactHostname(host)
 }
 
 func buildCiliumNetworkGrantEgress(rules []workspacesv1alpha1.NetworkGrantEgressRule, dnsNames []string) []any {

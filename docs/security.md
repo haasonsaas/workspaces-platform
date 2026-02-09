@@ -37,7 +37,7 @@ Everything else:
 
 Implementation detail:
 - `NetworkGrant.spec.policyMode=STRICT_FQDN` → `CiliumNetworkPolicy` using `toFQDNs` + `toPorts`
-- `NetworkGrant.spec.policyMode=PROXY_CONNECT` → enforced by `egress-proxy` (HTTP CONNECT), with no direct pod-to-internet policy created
+- `NetworkGrant.spec.policyMode=PROXY_CONNECT` → enforced by `egress-proxy` (HTTP CONNECT); the controller installs a DNS-only allow rule for the approved hostnames, and the proxy refuses to dial private/link-local/CGNAT IPs by default (DNS rebinding defense)
 
 MVP constraints (enforced by controller; no admission webhook required):
 - exact FQDN only (no wildcards)
@@ -114,8 +114,8 @@ Recommended next steps:
 
 These manifests are optional so clusters without this feature can still run the MVP.
 
-- `k8s/optional/agents-validatingadmissionpolicy.yaml`: denies non-conforming **agent Pods** (host mounts, privileged flags, missing `runtimeClassName=kata`, etc).
-- `k8s/optional/agentjob-validatingadmissionpolicy.yaml`: enforces **AgentJob CR** guardrails (pinned image digests, runtime class constraints).
-- `k8s/optional/desktop-validatingadmissionpolicy.yaml`: enforces **Desktop CR** guardrails (pinned image digests when explicitly set).
-- `k8s/optional/networkgrant-validatingadmissionpolicy.yaml`: restricts **NetworkGrant** create/update to the capability-broker (prevents bypass via direct kubectl edits).
-- `k8s/optional/ciliumnetworkpolicy-validatingadmissionpolicy.yaml`: restricts **CiliumNetworkPolicy** changes in `agents` to the operator (prevents bypass via direct Cilium policy injection).
+- `k8s/optional/hardened/agents-validatingadmissionpolicy.yaml`: denies non-conforming **agent Pods** (host mounts, privileged flags, missing `runtimeClassName=kata`, etc).
+- `k8s/optional/hardened/agentjob-validatingadmissionpolicy.yaml`: enforces **AgentJob CR** guardrails (pinned image digests, runtime class constraints).
+- `k8s/optional/hardened/desktop-validatingadmissionpolicy.yaml`: enforces **Desktop CR** guardrails (pinned image digests when explicitly set).
+- `k8s/optional/hardened/networkgrant-validatingadmissionpolicy.yaml`: restricts **NetworkGrant** create/update to the capability-broker (prevents bypass via direct kubectl edits).
+- `k8s/optional/hardened/ciliumnetworkpolicy-validatingadmissionpolicy.yaml`: restricts **CiliumNetworkPolicy** changes in `agents` to the operator (prevents bypass via direct Cilium policy injection).
