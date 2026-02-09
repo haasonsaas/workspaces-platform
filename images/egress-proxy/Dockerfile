@@ -1,4 +1,4 @@
-FROM golang:1.23 AS builder
+FROM golang:1.25 AS builder
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -24,4 +24,3 @@ COPY --from=builder /out/workspaces-egress-proxy /usr/local/bin/workspaces-egres
 
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/workspaces-egress-proxy"]
-

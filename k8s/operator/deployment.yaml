@@ -16,8 +16,7 @@ spec:
       serviceAccountName: workspaces-operator
       containers:
         - name: operator
-          # TODO: publish/build this image.
-          image: ghcr.io/workspaces-platform/workspaces-operator:latest
+          image: ghcr.io/haasonsaas/workspaces-operator:latest
           env:
             - name: AGENT_EGRESS_PROXY_URL
               valueFrom:

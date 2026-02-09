@@ -5,9 +5,11 @@ resources:
   - agents-quotas.yaml
   - desktops-quotas.yaml
 
+  # Optional hardening: restrict ingress to broker to only agents + webhook (and host probes).
+  - broker-ingress-policy.yaml
+
   - agents-validatingadmissionpolicy.yaml
   - agentjob-validatingadmissionpolicy.yaml
   - desktop-validatingadmissionpolicy.yaml
   - networkgrant-validatingadmissionpolicy.yaml
   - ciliumnetworkpolicy-validatingadmissionpolicy.yaml
-

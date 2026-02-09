@@ -41,7 +41,7 @@ Recommended (script mode, runs via `workspaces-agent-runner`):
 ```bash
 wsctl agent create \
   --name example \
-  --image ghcr.io/workspaces-platform/agent-runner:latest \
+  --image ghcr.io/haasonsaas/workspaces-agent-runner:latest \
   --script $'set -euo pipefail\necho hello from agent\nsleep 5'
 ```
 
@@ -49,7 +49,7 @@ Direct mode (runs container `command/args` as-is):
 ```bash
 wsctl agent create \
   --name example-direct \
-  --image ghcr.io/workspaces-platform/agent-runner:latest \
+  --image ghcr.io/haasonsaas/workspaces-agent-runner:latest \
   --shell 'echo hello from agent'
 ```
 

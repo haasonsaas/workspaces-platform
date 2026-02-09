@@ -16,8 +16,7 @@ spec:
       serviceAccountName: capability-broker
       containers:
         - name: broker
-          # TODO: publish/build this image.
-          image: ghcr.io/workspaces-platform/capability-broker:latest
+          image: ghcr.io/haasonsaas/workspaces-capability-broker:latest
           env:
             - name: LISTEN_ADDR
               value: ":8080"

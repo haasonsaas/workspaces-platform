@@ -1,0 +1,37 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: capability-broker-ingress
+  namespace: workspaces-system
+spec:
+  endpointSelector:
+    matchLabels:
+      app: capability-broker
+  ingress:
+    # Allow kubelet health probes (node -> pod).
+    - fromEntities:
+        - host
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # Allow agent pods to reach the broker (job-scoped tokens).
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: agents
+            workspaces.platform.dev/app: agent
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # Allow the GitHub webhook bridge to call broker endpoints (create jobs,
+    # approve grants), when deployed.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: workspaces-system
+            app: github-webhook
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+

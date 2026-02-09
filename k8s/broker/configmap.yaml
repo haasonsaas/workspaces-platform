@@ -32,7 +32,7 @@ data:
   github_sensitive_path_allowlist_repos: ""
 
   # Agent job defaults (used by /v1/agent-jobs).
-  agent_default_image: "ghcr.io/workspaces-platform/agent-runner:latest"
+  agent_default_image: "ghcr.io/haasonsaas/workspaces-agent-runner:latest"
   agent_default_policy_profile: "restricted"
   agent_default_ttl_seconds_after_finished: "3600"
   agent_default_runtime_class: "kata"

@@ -236,7 +236,7 @@ func cmdAgent(args []string) {
 		var (
 			name      = fs.String("name", "", "AgentJob name")
 			namespace = fs.String("namespace", "agents", "Namespace")
-			image     = fs.String("image", "ghcr.io/workspaces-platform/agent-runner:latest", "Agent image")
+			image     = fs.String("image", "ghcr.io/haasonsaas/workspaces-agent-runner:latest", "Agent image")
 			script    = fs.String("script", "", "Script to run (agent runner mode; recommended)")
 			workdir   = fs.String("workdir", "", "Working directory for --script (optional)")
 			shell     = fs.String("shell", "echo hello from agent", "Shell script to run (direct mode; bash -lc)")

@@ -4,7 +4,7 @@ metadata:
   name: example
   namespace: agents
 spec:
-  image: ghcr.io/workspaces-platform/agent-runner:latest
+  image: ghcr.io/haasonsaas/workspaces-agent-runner:latest
   # Recommended: script mode (workspaces agent runner) for capped + redacted logs.
   script: |
     set -euo pipefail

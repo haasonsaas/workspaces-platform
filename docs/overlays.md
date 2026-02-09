@@ -2,6 +2,24 @@
 
 This repo keeps the MVP base (`k8s/`) small and then layers optional features via `k8s-overlays/`.
 
+## Images
+
+The manifests default to GHCR images under `ghcr.io/haasonsaas/`:
+- `workspaces-operator`
+- `workspaces-capability-broker`
+- `workspaces-egress-proxy`
+- `workspaces-github-webhook`
+- `workspaces-agent-runner`
+- `workspaces-desktop`
+- `workspaces-auditship`
+
+For local dev, you can build these images and push them to whatever registry your cluster can pull from:
+```bash
+make images REGISTRY=ghcr.io/<you> TAG=dev
+```
+
+Then override images via kustomize (`kustomize edit set image ...`) or by editing the manifests.
+
 ## Base
 
 Applies:
@@ -59,4 +77,3 @@ This is the fastest path to a "secure-by-default" dev cluster, but it does assum
 - Cilium is installed (network policy enforcement)
 - snapshot CRDs/controller exist if you apply the Longhorn `VolumeSnapshotClass` example
 - your cluster supports `ValidatingAdmissionPolicy` for the admission layer
-

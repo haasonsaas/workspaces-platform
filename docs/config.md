@@ -53,7 +53,7 @@ GitHub policy (PR writes):
 - `GITHUB_CHECK_RUN_NAME` (default `workspaces-agent`)
 
 Agent job defaults (GitHub-triggered jobs created via broker):
-- `AGENT_DEFAULT_IMAGE` (default `ghcr.io/workspaces-platform/agent-runner:latest`)
+- `AGENT_DEFAULT_IMAGE` (default `ghcr.io/haasonsaas/workspaces-agent-runner:latest`)
 - `AGENT_DEFAULT_POLICY_PROFILE` (default `restricted`)
 - `AGENT_DEFAULT_TTL_SECONDS_AFTER_FINISHED` (default `3600`)
 - `AGENT_DEFAULT_RUNTIME_CLASS` (default `kata`)

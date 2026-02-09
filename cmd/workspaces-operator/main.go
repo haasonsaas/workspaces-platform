@@ -41,7 +41,7 @@ func main() {
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", true, "Enable leader election for controller manager.")
 	flag.StringVar(&leaderElectionID, "leader-election-id", "workspaces-operator.workspaces.platform.dev", "Leader election ID.")
-	flag.StringVar(&defaultDesktopImage, "default-desktop-image", getenv("DEFAULT_DESKTOP_IMAGE", "ghcr.io/workspaces-platform/desktop:latest"), "Default desktop image if Desktop.spec.image is empty.")
+	flag.StringVar(&defaultDesktopImage, "default-desktop-image", getenv("DEFAULT_DESKTOP_IMAGE", "ghcr.io/haasonsaas/workspaces-desktop:latest"), "Default desktop image if Desktop.spec.image is empty.")
 	flag.StringVar(&defaultAgentRuntimeClass, "default-agent-runtimeclass", getenv("DEFAULT_AGENT_RUNTIMECLASS", "kata"), "Default RuntimeClassName for AgentJobs.")
 	flag.StringVar(&agentEgressProxyURL, "agent-egress-proxy-url", getenv("AGENT_EGRESS_PROXY_URL", ""), "HTTP proxy URL injected into AgentJob pods as HTTP(S)_PROXY/ALL_PROXY (optional).")
 	flag.StringVar(&agentNoProxy, "agent-no-proxy", getenv("AGENT_NO_PROXY", ""), "NO_PROXY injected into AgentJob pods when agent egress proxy is set (optional).")

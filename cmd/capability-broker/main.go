@@ -609,7 +609,7 @@ func (s *server) handleCreateAgentJob(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	defaultImage := strings.TrimSpace(getenv("AGENT_DEFAULT_IMAGE", "ghcr.io/workspaces-platform/agent-runner:latest"))
+	defaultImage := strings.TrimSpace(getenv("AGENT_DEFAULT_IMAGE", "ghcr.io/haasonsaas/workspaces-agent-runner:latest"))
 	if defaultImage == "" {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "agent_default_image_not_configured"})
 		return

@@ -16,8 +16,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: auditship
-              # TODO: publish/build this image.
-              image: ghcr.io/workspaces-platform/auditship:latest
+              image: ghcr.io/haasonsaas/workspaces-auditship:latest
               args:
                 - "--dir=/var/lib/workspaces/audit"
                 - "--env-prefix=AUDIT_"
@@ -37,4 +36,3 @@ spec:
             - name: audit
               persistentVolumeClaim:
                 claimName: workspaces-audit
-

@@ -15,8 +15,7 @@ spec:
     spec:
       containers:
         - name: github-webhook
-          # TODO: publish/build this image.
-          image: ghcr.io/workspaces-platform/github-webhook:latest
+          image: ghcr.io/haasonsaas/workspaces-github-webhook:latest
           env:
             - name: LISTEN_ADDR
               value: ":8080"
