@@ -14,6 +14,12 @@ spec:
     # Optional: seed the home PVC from a HomeTemplate snapshot for warm starts.
     # seed:
     #   templateRef: default-home
+    # Optional: reset home by switching to a new PVC restored from snapshot.
+    # Bump requestedAt to trigger a reset.
+    # reset:
+    #   requestedAt: "2026-02-09T00:00:00Z"
+    #   templateRef: default-home
+    #   retainOldClaims: 1
   nodeSelector:
     workspaces.platform.dev/pool: desktops
   tolerations:

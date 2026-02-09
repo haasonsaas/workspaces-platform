@@ -40,6 +40,20 @@ Command syntax (PR comment):
 - `/agent run`
 - `/agent run profile=restricted ttl=3600`
 
+## Repo Convention For Agent Runs
+
+By default, the broker launches a PR-scoped AgentJob that checks out the PR head into `/workspace/repo` and runs:
+- `.workspaces/agent.sh` if present (executable preferred)
+
+Example `.workspaces/agent.sh`:
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "Running repo checks..."
+go test ./...
+```
+
 ## github-webhook Service
 
 Binary:

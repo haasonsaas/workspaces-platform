@@ -96,6 +96,8 @@ The operator creates a `Job` (`agentjob-<name>`) with:
 - no Linux caps, `seccomp: RuntimeDefault`
 - an ephemeral `/workspace`
 
+For PR-scoped agent runs (via `/agent run`), add a repo-local `.workspaces/agent.sh` and keep it deterministic (no implicit curl|bash).
+
 ## 6. Network Unlocks (Approval)
 
 `NetworkGrant` is the primitive for "unlock this destination for this job for N minutes".

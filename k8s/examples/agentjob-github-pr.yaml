@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  # The AgentJob controller expects: agentjob-<agentjob name>-github
+  name: agentjob-example-pr-github
+  namespace: agents
+type: Opaque
+stringData:
+  # WARNING: this is for manual testing only. In the real workflow, the broker
+  # mints a short-lived, repo-scoped read token and creates this Secret.
+  token: "<github_token_with_repo_read>"
+
+---
+apiVersion: workspaces.platform.dev/v1alpha1
+kind: AgentJob
+metadata:
+  name: example-pr
+  namespace: agents
+spec:
+  image: ghcr.io/workspaces-platform/agent-runner:latest
+  # Recommended: script mode runs via workspaces-agent-runner (capped + redacted logs).
+  script: |
+    set -euo pipefail
+    cd "${WORKSPACES_REPO_DIR:-/workspace/repo}"
+    echo "repo: ${WORKSPACES_GITHUB_REPO:-}"
+    echo "pr: ${WORKSPACES_GITHUB_PR_NUMBER:-}"
+    git rev-parse HEAD || true
+    ls -la
+  github:
+    repo: "owner/repo"
+    pullNumber: 123
+    # Optional: expected head SHA for integrity.
+    headSha: ""
+  policyProfile: restricted
+  ttlSecondsAfterFinished: 3600
+  runtimeClassName: kata
+  nodeSelector:
+    workspaces.platform.dev/pool: agents
+  tolerations:
+    - key: workspaces.platform.dev/pool
+      operator: Equal
+      value: agents
+      effect: NoSchedule
+
