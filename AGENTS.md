@@ -32,6 +32,7 @@ The platform must enforce:
 - `cmd/capability-broker/`: capability broker HTTP API (network unlocks; GitHub PR creation is implemented here).
 - `cmd/ws-proxy/`: gateway helper for SSH `ProxyCommand` (default: K8s port-forward; see `docs/access.md`).
 - `cmd/github-webhook/`: optional GitHub webhook bridge (PR comment approvals for `NetworkGrant`).
+- `cmd/wsctl/`: CLI for creating desktops/agentjobs and calling broker APIs.
 - `k8s/`: kustomize base (CRDs, namespaces, operator, broker, baseline policies).
 - `images/`: Dockerfiles for reference images.
 - `docs/`: system docs.
@@ -99,7 +100,7 @@ Rules:
 
 Auth (MVP):
 - Agent-facing endpoints require `X-Broker-Agent-Token` (or admin token).
-- Approval endpoints require `X-Broker-Admin-Token`.
+- Approval endpoints require `X-Broker-Admin-Token` (or `X-Broker-Webhook-Token` for GitHub comment approvals).
 
 ## GitHub App Integration (Broker-Only Writes)
 

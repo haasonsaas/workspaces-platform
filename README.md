@@ -20,6 +20,7 @@ Docs:
 - `docs/security.md`
 - `docs/audit.md`
 - `docs/github.md`
+- `docs/wsctl.md`
 
 This repo is an MVP that compiles and deploys manifests, but you still need to wire:
 - image build/publish for operator/broker/desktop/agent images

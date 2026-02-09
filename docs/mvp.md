@@ -53,6 +53,11 @@ Example `Desktop`:
 kubectl apply -f k8s/examples/desktop.yaml
 ```
 
+Or with `wsctl`:
+```bash
+wsctl desktop create --name jonathan --user jonathan --ssh-key-file ~/.ssh/id_ed25519.pub
+```
+
 The operator creates:
 - home PVC (`desktop-<name>-home`)
 - authorized keys secret (`desktop-<name>-authkeys`)
@@ -66,6 +71,11 @@ Access is via a Tailscale SSH gateway. See `docs/access.md` for SSH/VS Code Remo
 Example `AgentJob`:
 ```bash
 kubectl apply -f k8s/examples/agentjob.yaml
+```
+
+Or with `wsctl`:
+```bash
+wsctl agent create --name example --shell 'echo hello from agent'
 ```
 
 The operator creates a `Job` (`agentjob-<name>`) with:
@@ -93,7 +103,7 @@ MVP approval flow:
 Optional (GitHub workflow):
 - agent includes GitHub context (`repo`, `pullNumber`) when requesting a `NetworkGrant`
 - broker posts an approval request comment on the PR
-- `cmd/github-webhook` approves grants from allowlisted approvers via `/netgrant approve ...` comments
+- `cmd/github-webhook` approves grants from allowlisted approvers via `/netgrant approve ...` comments (prefer webhook token over admin token)
 
 See: `docs/github.md`.
 

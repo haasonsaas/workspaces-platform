@@ -18,11 +18,25 @@ Flow:
 2. Broker creates the `NetworkGrant` (unapproved) and posts a comment on the PR with an approval command:
    - `/netgrant approve <namespace>/<name> ttl=1800`
 3. `github-webhook` listens for `issue_comment` events, verifies signature, checks allowlists, and calls broker approval:
-   - `POST /v1/network-grants/{namespace}/{name}/approve`
+   - `POST /v1/network-grants/{namespace}/{name}/approve-github` (preferred; webhook token)
+   - falls back to `/approve` if configured with admin token
 
 Approval command syntax (PR comment):
 - `/netgrant approve agents/netgrant-abc123`
 - `/netgrant approve agents/netgrant-abc123 ttl=1800`
+
+## Agent Runs Via PR Comments (Optional)
+
+Flow:
+1. A repo owner triggers an agent run by commenting:
+   - `/agent run`
+2. `github-webhook` listens for `issue_comment` events and calls broker:
+   - `POST /v1/agent-jobs`
+3. Broker creates an `AgentJob` in the `agents` namespace and posts a status comment (and optionally a check-run).
+
+Command syntax (PR comment):
+- `/agent run`
+- `/agent run profile=restricted ttl=3600`
 
 ## github-webhook Service
 
@@ -37,8 +51,10 @@ Required env:
 - `GITHUB_WEBHOOK_SECRET` (HMAC secret configured in the GitHub App webhook settings)
 - `GITHUB_REPO_ALLOWLIST` (comma-separated `owner/repo`)
 - `GITHUB_APPROVER_ALLOWLIST` (comma-separated GitHub usernames)
+- `GITHUB_LAUNCHER_ALLOWLIST` (optional; defaults to approver allowlist)
 - `BROKER_BASE_URL` (e.g. `http://capability-broker.workspaces-system.svc.cluster.local:8080`)
-- `BROKER_ADMIN_TOKEN` (passed as `X-Broker-Admin-Token` to approve grants)
+- `BROKER_WEBHOOK_TOKEN` (preferred; passed as `X-Broker-Webhook-Token`)
+- `BROKER_ADMIN_TOKEN` (fallback; not recommended)
 
 Notes:
 - Secure default: deny all if allowlists are empty.

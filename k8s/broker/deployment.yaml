@@ -35,6 +35,13 @@ spec:
                   name: capability-broker-secrets
                   key: admin_token
                   optional: true
+            # Optional: used by GitHub webhook bridge (PR comment approvals / agent run triggers).
+            - name: BROKER_WEBHOOK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: capability-broker-secrets
+                  key: webhook_token
+                  optional: true
             # GitHub App integration (broker-only writes). Optional, but required to enable /v1/github/open-pr.
             - name: GITHUB_APP_ID
               valueFrom:
@@ -109,6 +116,44 @@ spec:
                 configMapKeyRef:
                   name: capability-broker-config
                   key: github_sensitive_path_allowlist_repos
+                  optional: true
+            # Agent job defaults (used by /v1/agent-jobs).
+            - name: AGENT_DEFAULT_IMAGE
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: agent_default_image
+                  optional: true
+            - name: AGENT_DEFAULT_POLICY_PROFILE
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: agent_default_policy_profile
+                  optional: true
+            - name: AGENT_DEFAULT_TTL_SECONDS_AFTER_FINISHED
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: agent_default_ttl_seconds_after_finished
+                  optional: true
+            - name: AGENT_DEFAULT_RUNTIME_CLASS
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: agent_default_runtime_class
+                  optional: true
+            # Optional: check-runs for agent-job triggers.
+            - name: GITHUB_ENABLE_CHECK_RUNS
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: github_enable_check_runs
+                  optional: true
+            - name: GITHUB_CHECK_RUN_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: github_check_run_name
                   optional: true
           ports:
             - name: http

@@ -35,16 +35,30 @@ spec:
                 configMapKeyRef:
                   name: github-webhook-config
                   key: github_approver_allowlist
+            - name: GITHUB_LAUNCHER_ALLOWLIST
+              valueFrom:
+                configMapKeyRef:
+                  name: github-webhook-config
+                  key: github_launcher_allowlist
+                  optional: true
             - name: BROKER_BASE_URL
               valueFrom:
                 configMapKeyRef:
                   name: github-webhook-config
                   key: broker_base_url
+            - name: BROKER_WEBHOOK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: github-webhook-secrets
+                  key: broker_webhook_token
+                  optional: true
+            # Backwards-compatible fallback; prefer BROKER_WEBHOOK_TOKEN.
             - name: BROKER_ADMIN_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: github-webhook-secrets
                   key: broker_admin_token
+                  optional: true
           ports:
             - name: http
               containerPort: 8080
@@ -56,4 +70,3 @@ spec:
             httpGet:
               path: /readyz
               port: 8080
-

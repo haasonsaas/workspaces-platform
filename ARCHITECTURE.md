@@ -136,7 +136,7 @@ Security properties:
 
 MVP auth:
 - Agent-facing endpoints require `X-Broker-Agent-Token` (or admin token).
-- Approval endpoints require `X-Broker-Admin-Token`.
+- Approval endpoints require `X-Broker-Admin-Token` (or `X-Broker-Webhook-Token` for GitHub comment approvals).
 
 ### 3) Gateway (Tailscale Edge)
 

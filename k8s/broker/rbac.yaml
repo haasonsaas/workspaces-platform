@@ -15,6 +15,9 @@ rules:
   - apiGroups: ["workspaces.platform.dev"]
     resources: ["networkgrants/status"]
     verbs: ["get"]
+  - apiGroups: ["workspaces.platform.dev"]
+    resources: ["agentjobs"]
+    verbs: ["get", "list", "watch", "create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -28,4 +31,3 @@ subjects:
   - kind: ServiceAccount
     name: capability-broker
     namespace: workspaces-system
-

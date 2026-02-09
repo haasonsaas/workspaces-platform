@@ -55,6 +55,9 @@ type githubService struct {
 	sensitivePathPrefixDenylist []string
 	sensitivePathAllowlistRepos map[string]struct{}
 
+	enableCheckRuns bool
+	checkRunName    string
+
 	audit auditpkg.Emitter
 
 	httpClient *http.Client
@@ -123,6 +126,12 @@ func newGitHubServiceFromEnv(audit auditpkg.Emitter) (*githubService, error) {
 
 	allowBinary := strings.EqualFold(strings.TrimSpace(getenv("GITHUB_ALLOW_BINARY_PATCHES", "false")), "true")
 
+	enableCheckRuns := strings.EqualFold(strings.TrimSpace(getenv("GITHUB_ENABLE_CHECK_RUNS", "false")), "true")
+	checkRunName := strings.TrimSpace(getenv("GITHUB_CHECK_RUN_NAME", "workspaces-agent"))
+	if checkRunName == "" {
+		checkRunName = "workspaces-agent"
+	}
+
 	return &githubService{
 		apiBase:                     apiBase,
 		gitBase:                     gitBase,
@@ -139,6 +148,8 @@ func newGitHubServiceFromEnv(audit auditpkg.Emitter) (*githubService, error) {
 		allowBinaryPatches:          allowBinary,
 		sensitivePathPrefixDenylist: sensitiveDeny,
 		sensitivePathAllowlistRepos: sensitiveAllowRepos,
+		enableCheckRuns:             enableCheckRuns,
+		checkRunName:                checkRunName,
 		audit:                       audit,
 		httpClient:                  &http.Client{Timeout: 30 * time.Second},
 		cachedToken:                 "",
@@ -215,6 +226,15 @@ func parseCSVList(csv string) []string {
 		out = append(out, s)
 	}
 	return out
+}
+
+func (g *githubService) repoIsAllowed(repo string) bool {
+	repo = strings.ToLower(strings.TrimSpace(repo))
+	if repo == "" {
+		return false
+	}
+	_, ok := g.repoAllowlist[repo]
+	return ok
 }
 
 type githubOpenPRRequest struct {
@@ -530,6 +550,77 @@ func (g *githubService) commentNetworkGrantRequest(ctx context.Context, repo str
 	}
 
 	return nil
+}
+
+func (g *githubService) commentAgentJobCreated(ctx context.Context, repo string, prNumber int, jobNS, jobName, policyProfile string) error {
+	repo = strings.ToLower(strings.TrimSpace(repo))
+	if repo == "" || !strings.Contains(repo, "/") {
+		return fmt.Errorf("invalid repo %q", repo)
+	}
+	if _, ok := g.repoAllowlist[repo]; !ok {
+		return fmt.Errorf("repo not allowlisted for github comments")
+	}
+	if prNumber <= 0 {
+		return fmt.Errorf("invalid prNumber %d", prNumber)
+	}
+
+	token, err := g.getInstallationToken(ctx)
+	if err != nil {
+		return err
+	}
+	owner, name, err := splitRepo(repo)
+	if err != nil {
+		return err
+	}
+
+	var checkRunURL string
+	if g.enableCheckRuns {
+		sha, shaErr := g.getPullHeadSHA(ctx, token, owner, name, prNumber)
+		if shaErr != nil {
+			log.Printf("github get pull sha failed: %v", shaErr)
+		} else {
+			u, crErr := g.createCheckRunInProgress(ctx, token, owner, name, sha, jobNS, jobName)
+			if crErr != nil {
+				log.Printf("github create check run failed: %v", crErr)
+			} else {
+				checkRunURL = u
+			}
+		}
+	}
+
+	body := formatAgentJobCreatedComment(jobNS, jobName, policyProfile, checkRunURL)
+	commentURL, err := g.createIssueComment(ctx, token, owner, name, prNumber, body)
+	if err != nil {
+		return err
+	}
+
+	if g.audit != nil {
+		g.audit.Emit("github.comment_agentjob_created", map[string]any{
+			"repo":          repo,
+			"pr_number":     prNumber,
+			"comment_url":   commentURL,
+			"check_run_url": checkRunURL,
+			"job_ns":        jobNS,
+			"job_name":      jobName,
+		})
+	}
+
+	return nil
+}
+
+func formatAgentJobCreatedComment(jobNS, jobName, policyProfile, checkRunURL string) string {
+	var b strings.Builder
+	b.WriteString("Agent job started.\n\n")
+	b.WriteString("- AgentJob: `" + strings.TrimSpace(jobNS) + "/" + strings.TrimSpace(jobName) + "`\n")
+	if strings.TrimSpace(policyProfile) != "" {
+		b.WriteString("- PolicyProfile: `" + strings.TrimSpace(policyProfile) + "`\n")
+	}
+	if strings.TrimSpace(checkRunURL) != "" {
+		b.WriteString("- Check: " + strings.TrimSpace(checkRunURL) + "\n")
+	}
+	b.WriteString("\nTrack:\n")
+	b.WriteString("`kubectl -n " + strings.TrimSpace(jobNS) + " get agentjobs " + strings.TrimSpace(jobName) + " -o yaml`\n")
+	return b.String()
 }
 
 func formatNetworkGrantApprovalComment(ng *workspacesv1alpha1.NetworkGrant) string {
@@ -890,4 +981,83 @@ func (g *githubService) createIssueComment(ctx context.Context, token, owner, re
 		return "", errors.New("github create comment returned empty url")
 	}
 	return parsed.HTMLURL, nil
+}
+
+func (g *githubService) getPullHeadSHA(ctx context.Context, token, owner, repo string, prNumber int) (string, error) {
+	u := fmt.Sprintf("%s/repos/%s/%s/pulls/%d", g.apiBase, owner, repo, prNumber)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := g.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("github get pull: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+
+	var parsed struct {
+		Head struct {
+			SHA string `json:"sha"`
+		} `json:"head"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(parsed.Head.SHA) == "" {
+		return "", errors.New("github get pull returned empty head sha")
+	}
+	return strings.TrimSpace(parsed.Head.SHA), nil
+}
+
+func (g *githubService) createCheckRunInProgress(ctx context.Context, token, owner, repo, headSHA, jobNS, jobName string) (string, error) {
+	u := fmt.Sprintf("%s/repos/%s/%s/check-runs", g.apiBase, owner, repo)
+
+	payload := map[string]any{
+		"name":        g.checkRunName,
+		"head_sha":    headSHA,
+		"status":      "in_progress",
+		"external_id": fmt.Sprintf("%s/%s", strings.TrimSpace(jobNS), strings.TrimSpace(jobName)),
+		"output": map[string]any{
+			"title":   "Agent job started",
+			"summary": fmt.Sprintf("AgentJob: %s/%s", strings.TrimSpace(jobNS), strings.TrimSpace(jobName)),
+		},
+	}
+	b, _ := json.Marshal(payload)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(b))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := g.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("github create check run: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+
+	var parsed struct {
+		HTMLURL string `json:"html_url"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(parsed.HTMLURL), nil
 }

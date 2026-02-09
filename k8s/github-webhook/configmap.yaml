@@ -10,6 +10,9 @@ data:
   # Comma-separated allowlist of GitHub usernames allowed to approve NetworkGrants.
   github_approver_allowlist: ""
 
+  # Comma-separated allowlist of GitHub usernames allowed to trigger `/agent run`.
+  # If empty, defaults to `github_approver_allowlist`.
+  github_launcher_allowlist: ""
+
   # Base URL for capability-broker.
   broker_base_url: "http://capability-broker.workspaces-system.svc.cluster.local:8080"
-

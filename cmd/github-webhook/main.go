@@ -23,9 +23,11 @@ type server struct {
 
 	repoAllowlist     map[string]struct{}
 	approverAllowlist map[string]struct{}
+	launcherAllowlist map[string]struct{}
 
-	brokerBaseURL    string
-	brokerAdminToken string
+	brokerBaseURL string
+	brokerHeader  string
+	brokerToken   string
 
 	httpClient *http.Client
 }
@@ -48,21 +50,39 @@ func main() {
 		log.Fatalf("GITHUB_APPROVER_ALLOWLIST is empty (secure default: deny all)")
 	}
 
+	launchers := parseCSVSet(os.Getenv("GITHUB_LAUNCHER_ALLOWLIST"))
+	if len(launchers) == 0 {
+		// Reasonable default: only approvers can trigger agent runs.
+		launchers = approvers
+	}
+
 	brokerBase := strings.TrimRight(getenv("BROKER_BASE_URL", ""), "/")
 	if brokerBase == "" {
 		log.Fatalf("BROKER_BASE_URL is required (e.g. http://capability-broker.workspaces-system.svc.cluster.local:8080)")
 	}
-	adminToken := os.Getenv("BROKER_ADMIN_TOKEN")
-	if adminToken == "" {
-		log.Fatalf("BROKER_ADMIN_TOKEN is required")
+
+	brokerHeader := ""
+	brokerToken := ""
+	if v := strings.TrimSpace(os.Getenv("BROKER_WEBHOOK_TOKEN")); v != "" {
+		brokerHeader = "X-Broker-Webhook-Token"
+		brokerToken = v
+	} else if v := strings.TrimSpace(os.Getenv("BROKER_ADMIN_TOKEN")); v != "" {
+		// Backwards-compatible fallback; not recommended.
+		brokerHeader = "X-Broker-Admin-Token"
+		brokerToken = v
+		log.Printf("warning: using BROKER_ADMIN_TOKEN; prefer BROKER_WEBHOOK_TOKEN for least privilege")
+	} else {
+		log.Fatalf("BROKER_WEBHOOK_TOKEN (preferred) or BROKER_ADMIN_TOKEN is required")
 	}
 
 	s := &server{
 		webhookSecret:     []byte(secret),
 		repoAllowlist:     repos,
 		approverAllowlist: approvers,
+		launcherAllowlist: launchers,
 		brokerBaseURL:     brokerBase,
-		brokerAdminToken:  adminToken,
+		brokerHeader:      brokerHeader,
+		brokerToken:       brokerToken,
 		httpClient:        &http.Client{Timeout: 15 * time.Second},
 	}
 
@@ -161,26 +181,37 @@ func (s *server) handleIssueComment(w http.ResponseWriter, r *http.Request, body
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
-	if _, ok := s.approverAllowlist[actor]; !ok {
-		// Ignore; don't leak policy details.
-		w.WriteHeader(http.StatusAccepted)
-		return
+
+	handled := false
+
+	if cmd, ok := parseNetgrantApproveCommand(ev.Comment.Body); ok {
+		if _, ok := s.approverAllowlist[actor]; ok {
+			reason := fmt.Sprintf("github:%s#%d %s", repo, ev.Issue.Number, strings.TrimSpace(ev.Comment.HTMLURL))
+			if err := s.approveNetworkGrant(r.Context(), cmd, actor, reason); err != nil {
+				log.Printf("approve network grant failed: %v", err)
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			handled = true
+		}
 	}
 
-	cmd, ok := parseNetgrantApproveCommand(ev.Comment.Body)
-	if !ok {
-		w.WriteHeader(http.StatusAccepted)
-		return
+	if cmd, ok := parseAgentRunCommand(ev.Comment.Body); ok {
+		if _, ok := s.launcherAllowlist[actor]; ok {
+			if err := s.createAgentJob(r.Context(), repo, ev.Issue.Number, actor, strings.TrimSpace(ev.Comment.HTMLURL), cmd); err != nil {
+				log.Printf("create agent job failed: %v", err)
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			handled = true
+		}
 	}
 
-	reason := fmt.Sprintf("github:%s#%d %s", repo, ev.Issue.Number, strings.TrimSpace(ev.Comment.HTMLURL))
-	if err := s.approveNetworkGrant(r.Context(), cmd, actor, reason); err != nil {
-		log.Printf("approve network grant failed: %v", err)
-		w.WriteHeader(http.StatusBadGateway)
+	if handled {
+		w.WriteHeader(http.StatusOK)
 		return
 	}
-
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(http.StatusAccepted)
 }
 
 type netgrantApproveCommand struct {
@@ -190,16 +221,10 @@ type netgrantApproveCommand struct {
 }
 
 func parseNetgrantApproveCommand(body string) (netgrantApproveCommand, bool) {
-	line := strings.TrimSpace(body)
-	if line == "" {
+	line, ok := findCommandLine(body, "/netgrant")
+	if !ok {
 		return netgrantApproveCommand{}, false
 	}
-	// Use the first non-empty line only.
-	if idx := strings.IndexByte(line, '\n'); idx >= 0 {
-		line = strings.TrimSpace(line[:idx])
-	}
-	// Allow users to wrap the command in backticks.
-	line = strings.Trim(line, "`")
 
 	parts := strings.Fields(line)
 	if len(parts) < 3 {
@@ -242,7 +267,11 @@ func parseNetgrantApproveCommand(body string) (netgrantApproveCommand, bool) {
 }
 
 func (s *server) approveNetworkGrant(ctx context.Context, cmd netgrantApproveCommand, approvedBy, reason string) error {
-	u := fmt.Sprintf("%s/v1/network-grants/%s/%s/approve", s.brokerBaseURL, cmd.Namespace, cmd.Name)
+	path := "approve"
+	if s.brokerHeader == "X-Broker-Webhook-Token" {
+		path = "approve-github"
+	}
+	u := fmt.Sprintf("%s/v1/network-grants/%s/%s/%s", s.brokerBaseURL, cmd.Namespace, cmd.Name, path)
 
 	payload := map[string]any{
 		"approvedBy": approvedBy,
@@ -258,7 +287,7 @@ func (s *server) approveNetworkGrant(ctx context.Context, cmd netgrantApproveCom
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Broker-Admin-Token", s.brokerAdminToken)
+	req.Header.Set(s.brokerHeader, s.brokerToken)
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
@@ -269,6 +298,85 @@ func (s *server) approveNetworkGrant(ctx context.Context, cmd netgrantApproveCom
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("broker approve: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+	return nil
+}
+
+type agentRunCommand struct {
+	PolicyProfile string
+	TTLSeconds    *int32
+}
+
+func parseAgentRunCommand(body string) (agentRunCommand, bool) {
+	line, ok := findCommandLine(body, "/agent")
+	if !ok {
+		return agentRunCommand{}, false
+	}
+
+	parts := strings.Fields(line)
+	if len(parts) < 2 {
+		return agentRunCommand{}, false
+	}
+	if parts[0] != "/agent" || parts[1] != "run" {
+		return agentRunCommand{}, false
+	}
+
+	var out agentRunCommand
+	for _, p := range parts[2:] {
+		if strings.HasPrefix(p, "profile=") || strings.HasPrefix(p, "policyProfile=") {
+			out.PolicyProfile = strings.TrimSpace(strings.SplitN(p, "=", 2)[1])
+			continue
+		}
+		if strings.HasPrefix(p, "ttl=") {
+			raw := strings.TrimSpace(strings.TrimPrefix(p, "ttl="))
+			n, err := strconv.ParseInt(raw, 10, 32)
+			if err != nil || n <= 0 || n > 24*60*60 {
+				return agentRunCommand{}, false
+			}
+			v := int32(n)
+			out.TTLSeconds = &v
+			continue
+		}
+	}
+
+	return out, true
+}
+
+func (s *server) createAgentJob(ctx context.Context, repo string, prNumber int, actor, commentURL string, cmd agentRunCommand) error {
+	u := fmt.Sprintf("%s/v1/agent-jobs", s.brokerBaseURL)
+
+	payload := map[string]any{
+		"github": map[string]any{
+			"repo":       repo,
+			"pullNumber": prNumber,
+			"actor":      actor,
+			"commentUrl": commentURL,
+		},
+	}
+	if strings.TrimSpace(cmd.PolicyProfile) != "" {
+		payload["policyProfile"] = strings.TrimSpace(cmd.PolicyProfile)
+	}
+	if cmd.TTLSeconds != nil {
+		payload["ttlSecondsAfterFinished"] = *cmd.TTLSeconds
+	}
+	b, _ := json.Marshal(payload)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(s.brokerHeader, s.brokerToken)
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("broker create agent job: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 	return nil
 }
@@ -304,6 +412,20 @@ func parseCSVSet(csv string) map[string]struct{} {
 		out[s] = struct{}{}
 	}
 	return out
+}
+
+func findCommandLine(body string, prefix string) (string, bool) {
+	for _, raw := range strings.Split(body, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		line = strings.Trim(line, "`")
+		if strings.HasPrefix(line, prefix) {
+			return line, true
+		}
+	}
+	return "", false
 }
 
 func getenv(k, def string) string {
