@@ -92,7 +92,13 @@ func main() {
 	mux.HandleFunc("/github/webhook", s.handleGitHubWebhook)
 
 	log.Printf("github-webhook listening on %s", listenAddr)
-	log.Fatal(http.ListenAndServe(listenAddr, mux))
+	srv := &http.Server{
+		Addr:              listenAddr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		MaxHeaderBytes:    32 << 10, // 32KiB
+	}
+	log.Fatal(srv.ListenAndServe())
 }
 
 func (s *server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {

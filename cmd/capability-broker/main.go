@@ -141,7 +141,13 @@ func main() {
 	s.startCheckRunReporter()
 
 	log.Printf("capability-broker listening on %s", listenAddr)
-	log.Fatal(http.ListenAndServe(listenAddr, r))
+	srv := &http.Server{
+		Addr:              listenAddr,
+		Handler:           r,
+		ReadHeaderTimeout: 5 * time.Second,
+		MaxHeaderBytes:    32 << 10, // 32KiB
+	}
+	log.Fatal(srv.ListenAndServe())
 }
 
 type createNetworkGrantRequest struct {
