@@ -22,6 +22,8 @@ spec:
             - "--leader-elect=true"
             - "--metrics-bind-address=:8080"
             - "--health-probe-bind-address=:8081"
+            - "--networkgrant-max-ttl-seconds=7200"
+            - "--networkgrant-max-egress-rules=20"
           ports:
             - name: metrics
               containerPort: 8080
@@ -35,4 +37,3 @@ spec:
             httpGet:
               path: /readyz
               port: 8081
-

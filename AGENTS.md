@@ -84,6 +84,8 @@ MVP constraints (enforced by controller):
 - `protocol`: `TCP` only
 - `purpose` is required
 - non-443 ports require `allowNon443: true`
+- `ttlSeconds` is capped (default max `7200`; configure via `NETWORKGRANT_MAX_TTL_SECONDS` or `--networkgrant-max-ttl-seconds`)
+- `egress` destinations are capped (default max `20`; configure via `NETWORKGRANT_MAX_EGRESS_RULES` or `--networkgrant-max-egress-rules`)
 
 ## Capability Broker (Choke Point)
 

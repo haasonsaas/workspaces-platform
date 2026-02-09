@@ -165,6 +165,9 @@ spec:
             properties:
               active:
                 type: boolean
+              approvedAt:
+                format: date-time
+                type: string
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current

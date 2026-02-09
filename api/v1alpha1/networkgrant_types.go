@@ -76,8 +76,9 @@ type NetworkGrantSpec struct {
 }
 
 type NetworkGrantStatus struct {
-	Active    bool        `json:"active,omitempty"`
-	ExpiresAt metav1.Time `json:"expiresAt,omitempty"`
+	Active     bool        `json:"active,omitempty"`
+	ApprovedAt metav1.Time `json:"approvedAt,omitempty"`
+	ExpiresAt  metav1.Time `json:"expiresAt,omitempty"`
 
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }

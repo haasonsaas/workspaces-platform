@@ -22,9 +22,16 @@ import (
 type NetworkGrantReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+
+	// MaxTTLSeconds caps how long approved grants can remain active. 0 disables the cap.
+	MaxTTLSeconds int32
+
+	// MaxEgressRules caps the number of destinations per grant. 0 disables the cap.
+	MaxEgressRules int
 }
 
 const networkGrantCondSpecValid = "SpecValid"
+const networkGrantDefaultTTLSeconds int32 = 1800
 
 func (r *NetworkGrantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var grant workspacesv1alpha1.NetworkGrant
@@ -44,7 +51,7 @@ func (r *NetworkGrantReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Validate spec. Without an admission webhook, the controller must ensure
 	// invalid requests never produce enforceable network policy.
-	matchLabels, err := validateAndResolveNetworkGrantMatchLabels(&grant)
+	matchLabels, err := validateAndResolveNetworkGrantMatchLabels(&grant, r.MaxTTLSeconds, r.MaxEgressRules)
 	if err != nil {
 		_ = r.Delete(ctx, cnp)
 		if grant.Status.Active {
@@ -60,26 +67,46 @@ func (r *NetworkGrantReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// If not approved, ensure policy doesn't exist.
 	if !grant.Spec.Approved {
 		_ = r.Delete(ctx, cnp)
-		if grant.Status.Active {
+		if grant.Status.Active || !grant.Status.ExpiresAt.IsZero() || !grant.Status.ApprovedAt.IsZero() {
 			patch := client.MergeFrom(grant.DeepCopy())
 			grant.Status.Active = false
+			grant.Status.ExpiresAt = metav1.Time{}
+			grant.Status.ApprovedAt = metav1.Time{}
 			_ = r.Status().Patch(ctx, &grant, patch)
 		}
 		return ctrl.Result{}, nil
 	}
 
-	ttl := grant.Spec.TTLSeconds
-	if ttl <= 0 {
-		ttl = 1800
+	now := time.Now()
+	ttl, err := resolveNetworkGrantTTLSeconds(grant.Spec.TTLSeconds, r.MaxTTLSeconds)
+	if err != nil {
+		_ = r.Delete(ctx, cnp)
+		if grant.Status.Active {
+			patch := client.MergeFrom(grant.DeepCopy())
+			grant.Status.Active = false
+			_ = r.Status().Patch(ctx, &grant, patch)
+		}
+		_ = r.setNetworkGrantSpecValidCondition(ctx, &grant, false, "ValidationFailed", err.Error())
+		return ctrl.Result{}, nil
 	}
 
-	now := time.Now()
-	expiresAt := grant.Status.ExpiresAt.Time
-	if expiresAt.IsZero() {
-		expiresAt = now.Add(time.Duration(ttl) * time.Second)
-		patch := client.MergeFrom(grant.DeepCopy())
-		grant.Status.ExpiresAt = metav1.NewTime(expiresAt)
+	approvedAt := grant.Status.ApprovedAt.Time
+	if approvedAt.IsZero() {
+		before := grant.DeepCopy()
+		grant.Status.ApprovedAt = metav1.NewTime(now)
+		patch := client.MergeFrom(before)
 		_ = r.Status().Patch(ctx, &grant, patch)
+		approvedAt = now
+	}
+
+	desiredExpiresAt := approvedAt.Add(time.Duration(ttl) * time.Second)
+	expiresAt := grant.Status.ExpiresAt.Time
+	if expiresAt.IsZero() || expiresAt.After(desiredExpiresAt) {
+		before := grant.DeepCopy()
+		grant.Status.ExpiresAt = metav1.NewTime(desiredExpiresAt)
+		patch := client.MergeFrom(before)
+		_ = r.Status().Patch(ctx, &grant, patch)
+		expiresAt = desiredExpiresAt
 	}
 
 	if now.After(expiresAt) {
@@ -126,7 +153,22 @@ func (r *NetworkGrantReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func validateAndResolveNetworkGrantMatchLabels(grant *workspacesv1alpha1.NetworkGrant) (map[string]string, error) {
+func resolveNetworkGrantTTLSeconds(requested, max int32) (int32, error) {
+	if requested > 0 {
+		if max > 0 && requested > max {
+			return 0, fmt.Errorf("ttlSeconds %d exceeds max %d", requested, max)
+		}
+		return requested, nil
+	}
+
+	ttl := networkGrantDefaultTTLSeconds
+	if max > 0 && ttl > max {
+		ttl = max
+	}
+	return ttl, nil
+}
+
+func validateAndResolveNetworkGrantMatchLabels(grant *workspacesv1alpha1.NetworkGrant, maxTTLSeconds int32, maxEgressRules int) (map[string]string, error) {
 	// Selector must be explicit and stable.
 	var matchLabels map[string]string
 	if grant.Spec.AgentJobRef != nil && strings.TrimSpace(grant.Spec.AgentJobRef.Name) != "" {
@@ -177,6 +219,13 @@ func validateAndResolveNetworkGrantMatchLabels(grant *workspacesv1alpha1.Network
 
 	if len(grant.Spec.Egress) == 0 {
 		return nil, fmt.Errorf("egress must contain at least one destination")
+	}
+	if maxEgressRules > 0 && len(grant.Spec.Egress) > maxEgressRules {
+		return nil, fmt.Errorf("egress contains too many destinations (%d > %d)", len(grant.Spec.Egress), maxEgressRules)
+	}
+
+	if _, err := resolveNetworkGrantTTLSeconds(grant.Spec.TTLSeconds, maxTTLSeconds); err != nil {
+		return nil, err
 	}
 
 	for i, r := range grant.Spec.Egress {

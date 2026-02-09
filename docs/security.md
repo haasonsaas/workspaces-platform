@@ -43,6 +43,8 @@ MVP constraints (enforced by controller; no admission webhook required):
 - TCP only
 - 443-only by default (set `allowNon443: true` to permit non-443)
 - `purpose` required on every `NetworkGrant`
+- `ttlSeconds` is capped by the operator (default `7200`; `NETWORKGRANT_MAX_TTL_SECONDS` / `--networkgrant-max-ttl-seconds`)
+- `egress` destinations are capped by the operator (default `20`; `NETWORKGRANT_MAX_EGRESS_RULES` / `--networkgrant-max-egress-rules`)
 
 Hard defaults:
 - agents are default-deny egress

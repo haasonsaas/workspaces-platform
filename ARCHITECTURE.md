@@ -200,6 +200,8 @@ MVP schema constraints (enforced by controller):
 - `protocol`: `TCP` only
 - ports: `443` only by default (set `allowNon443: true` to permit others)
 - `purpose` is required (human justification)
+- `ttlSeconds` is capped by the operator (default `7200`; `NETWORKGRANT_MAX_TTL_SECONDS` / `--networkgrant-max-ttl-seconds`)
+- `egress` destinations are capped by the operator (default `20`; `NETWORKGRANT_MAX_EGRESS_RULES` / `--networkgrant-max-egress-rules`)
 
 Optional GitHub approval loop:
 - broker can post a PR comment requesting approval (if the agent request includes GitHub context)
