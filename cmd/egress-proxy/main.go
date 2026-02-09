@@ -207,7 +207,13 @@ func main() {
 	mux.HandleFunc("/", s.handleProxy)
 
 	log.Printf("egress-proxy listening on %s", listenAddr)
-	log.Fatal(http.ListenAndServe(listenAddr, mux))
+	srv := &http.Server{
+		Addr:              listenAddr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		MaxHeaderBytes:    8 << 10, // 8KiB
+	}
+	log.Fatal(srv.ListenAndServe())
 }
 
 func (s *server) refreshPodsLoop(ctx context.Context, every time.Duration) {
