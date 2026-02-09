@@ -205,6 +205,7 @@ func (r *DesktopReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 		podSpec := &deploy.Spec.Template.Spec
 		podSpec.AutomountServiceAccountToken = ptrTo(false)
+		podSpec.EnableServiceLinks = ptrTo(false)
 		podSpec.NodeSelector = desk.Spec.NodeSelector
 		podSpec.Tolerations = desk.Spec.Tolerations
 
