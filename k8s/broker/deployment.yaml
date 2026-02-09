@@ -43,6 +43,31 @@ spec:
                   name: capability-broker-secrets
                   key: webhook_token
                   optional: true
+            # NetworkGrant policy guardrails (proxy-first by default).
+            - name: BROKER_NETWORK_PUBLIC_EGRESS_MODE
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: broker_network_public_egress_mode
+                  optional: true
+            - name: BROKER_NETWORK_PUBLIC_EGRESS_ALLOWLIST
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: broker_network_public_egress_allowlist
+                  optional: true
+            - name: BROKER_NETWORK_PUBLIC_DNS_ALLOWLIST
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: broker_network_public_dns_allowlist
+                  optional: true
+            - name: BROKER_NETWORK_INTERNAL_SUFFIX_ALLOWLIST
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: broker_network_internal_suffix_allowlist
+                  optional: true
             # GitHub App integration (broker-only writes). Optional, but required to enable /v1/github/open-pr.
             - name: GITHUB_APP_ID
               valueFrom:

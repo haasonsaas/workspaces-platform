@@ -1,0 +1,141 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cargo-proxy-cache
+  namespace: workspaces-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: longhorn
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cargo-proxy-nginx
+  namespace: workspaces-system
+data:
+  default.conf: |
+    proxy_cache_path /var/cache/nginx/index levels=1:2 keys_zone=cargo_index:10m max_size=2g inactive=1d use_temp_path=off;
+    proxy_cache_path /var/cache/nginx/crates levels=1:2 keys_zone=cargo_crates:10m max_size=20g inactive=180d use_temp_path=off;
+
+    server {
+      listen 8080;
+
+      # For sparse index clients, Cargo fetches this config first. We rewrite `dl`
+      # to point at the in-cluster crate download proxy.
+      location = /index/config.json {
+        default_type application/json;
+        return 200 '{"dl":"http://cargo-proxy.workspaces-system.svc.cluster.local:8080/crates","api":"https://crates.io"}';
+      }
+
+      location /index/ {
+        limit_except GET HEAD { deny all; }
+        proxy_ssl_server_name on;
+        proxy_pass https://index.crates.io/;
+        proxy_set_header Host index.crates.io;
+        proxy_cache cargo_index;
+        proxy_cache_valid 200 301 302 10m;
+        proxy_cache_valid 404 1m;
+      }
+
+      location /crates/ {
+        limit_except GET HEAD { deny all; }
+        proxy_ssl_server_name on;
+        proxy_pass https://static.crates.io/crates/;
+        proxy_set_header Host static.crates.io;
+        proxy_cache cargo_crates;
+        proxy_cache_valid 200 301 302 30d;
+        proxy_cache_valid 404 10m;
+      }
+
+      location = /healthz {
+        return 200 "ok\n";
+      }
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cargo-proxy
+  namespace: workspaces-system
+  labels:
+    workspaces.platform.dev/app: proxy
+    workspaces.platform.dev/component: package-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cargo-proxy
+  template:
+    metadata:
+      labels:
+        app: cargo-proxy
+        workspaces.platform.dev/app: proxy
+        workspaces.platform.dev/component: package-proxy
+    spec:
+      securityContext:
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: nginx
+          # Pin by digest in production (see docs/reproducibility.md).
+          image: nginxinc/nginx-unprivileged:stable-alpine
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 101
+            runAsGroup: 101
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: cache
+              mountPath: /var/cache/nginx
+            - name: config
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: cargo-proxy-cache
+        - name: config
+          configMap:
+            name: cargo-proxy-nginx
+        - name: tmp
+          emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cargo-proxy
+  namespace: workspaces-system
+spec:
+  selector:
+    app: cargo-proxy
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+

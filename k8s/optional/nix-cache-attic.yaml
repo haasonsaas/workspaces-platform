@@ -1,0 +1,120 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: attic-storage
+  namespace: workspaces-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: longhorn
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: attic-config
+  namespace: workspaces-system
+data:
+  server.toml: |
+    listen = "0.0.0.0:8080"
+
+    [database]
+    url = "sqlite:///var/lib/attic/server.db?mode=rwc"
+
+    [storage]
+    type = "local"
+    path = "/var/lib/attic/storage"
+
+    [jwt]
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: attic
+  namespace: workspaces-system
+  labels:
+    workspaces.platform.dev/app: proxy
+    workspaces.platform.dev/component: package-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: attic
+  template:
+    metadata:
+      labels:
+        app: attic
+        workspaces.platform.dev/app: proxy
+        workspaces.platform.dev/component: package-proxy
+    spec:
+      securityContext:
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: attic
+          # Pin by digest in production (see docs/reproducibility.md).
+          image: ghcr.io/zhaofengli/attic:latest
+          args:
+            - atticd
+            - --config
+            - /etc/attic/server.toml
+            - --mode
+            - monolithic
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # See k8s/examples/attic-secrets.yaml for how to generate this.
+            - name: ATTIC_SERVER_TOKEN_RS256_SECRET_BASE64
+              valueFrom:
+                secretKeyRef:
+                  name: attic-secrets
+                  key: token_rs256_secret_base64
+                  optional: false
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/attic
+            - name: config
+              mountPath: /etc/attic/server.toml
+              subPath: server.toml
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: attic-storage
+        - name: config
+          configMap:
+            name: attic-config
+        - name: tmp
+          emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: attic
+  namespace: workspaces-system
+spec:
+  selector:
+    app: attic
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+

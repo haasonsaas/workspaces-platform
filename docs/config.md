@@ -23,6 +23,12 @@ Core:
 - `BROKER_ADMIN_TOKEN` (optional): admin token for approval endpoints.
 - `BROKER_WEBHOOK_TOKEN` (optional, preferred): least-privilege token for `github-webhook` and GitHub-triggered actions.
 
+NetworkGrant policy guardrails (proxy-first by default):
+- `BROKER_NETWORK_PUBLIC_EGRESS_MODE` (default `deny`): `deny|allow`. When `deny`, non-admin callers (job tokens + GitHub comment approvals) cannot request/approve public internet egress unless it is explicitly allowlisted.
+- `BROKER_NETWORK_PUBLIC_EGRESS_ALLOWLIST` (default empty): CSV of exact public hostnames allowed for non-admin egress requests/approvals (e.g. `github.com,api.github.com`).
+- `BROKER_NETWORK_PUBLIC_DNS_ALLOWLIST` (default empty): CSV of exact public DNS names allowed in `NetworkGrant.spec.dnsAllow` for non-admin approvals.
+- `BROKER_NETWORK_INTERNAL_SUFFIX_ALLOWLIST` (default `svc.cluster.local,cluster.local`): CSV of suffixes treated as internal destinations (exempt from public egress restrictions).
+
 GitHub App (broker-only PR writes and PR-scoped agent runs):
 - `GITHUB_APP_ID` (required to enable GitHub features)
 - `GITHUB_APP_INSTALLATION_ID` (required to enable GitHub features)

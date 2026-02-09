@@ -53,6 +53,10 @@ Hard defaults:
 - deny cloud metadata endpoints (`169.254.169.254`, etc.)
 - do not allow direct public internet egress by default; prefer internal proxies/mirrors
 
+Broker guardrail:
+- GitHub comment approvals (webhook token) cannot approve public internet `NetworkGrant`s unless the hostnames are explicitly allowlisted (`BROKER_NETWORK_*`).
+- Admin token approvals can override this (explicit escape hatch).
+
 ## Capability Broker (Least Privilege)
 
 The broker is the choke point for:

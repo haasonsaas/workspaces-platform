@@ -101,6 +101,10 @@ DNS hardening:
 - baseline agent policy allows DNS only for in-cluster names (e.g. `*.svc.cluster.local`) to prevent DNS exfil when agents are otherwise “corp network off”
 - approved `NetworkGrant`s add per-host DNS L7 allow rules for their destinations (and optional extra DNS names for CNAME chains)
 
+Proxy-first guardrail:
+- The capability-broker rejects/blocks approving public internet `NetworkGrant`s by default unless the hostnames are explicitly allowlisted (`BROKER_NETWORK_*`).
+- This prevents “PR comment approves arbitrary internet” drift; admin approvals remain the explicit escape hatch.
+
 ## Core Control Plane Components
 
 ### 1) Workspaces Operator
@@ -197,6 +201,9 @@ PR-scoped agent jobs:
 3. Approver flips to `approved=true` with `ttlSeconds`, `approvedBy`, `reason`.
 4. Operator translates it into a `CiliumNetworkPolicy` scoped to that job’s labels.
 5. On expiry, operator deletes/invalidates the policy.
+
+Guardrails:
+- When `BROKER_NETWORK_PUBLIC_EGRESS_MODE=deny` (default), GitHub comment approvals cannot approve public internet egress unless the hostnames are allowlisted; admin can override via the admin approval endpoint.
 
 MVP schema constraints (enforced by controller):
 - `policyMode`: `STRICT_FQDN` only

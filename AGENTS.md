@@ -134,6 +134,10 @@ Pattern:
 3. approver grants `NetworkGrant` scoped to job labels + TTL.
 4. controller enforces via Cilium FQDN egress policy and revokes on expiry.
 
+Broker guardrail:
+- By default, GitHub comment approvals (webhook token) cannot approve public internet egress unless the hostnames are explicitly allowlisted (`BROKER_NETWORK_*`).
+- Admin approvals remain the explicit escape hatch.
+
 ## Desktop Access (SSH / VS Code Remote)
 
 Day 1 access is via a Tailscale SSH gateway.

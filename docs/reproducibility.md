@@ -34,10 +34,14 @@ To avoid “cold internet builds” and make agents fast:
 - back it with MinIO/S3 for storage
 - configure desktops/agents to use it as a substituter
 
+Optional example manifest:
+- `k8s/optional/nix-cache-attic.yaml` (monolithic Attic with local PVC storage; label-matched by `agents-allow-internal-proxies`)
+- `k8s/examples/attic-secrets.yaml` (JWT signing secret)
+
 Example Nix config snippet (conceptual):
 ```text
-substituters = http://attic.workspaces-system.svc.cluster.local:8080/cache/default https://cache.nixos.org
-trusted-public-keys = default:<your-attic-public-key>
+substituters = http://attic.workspaces-system.svc.cluster.local:8080/<cache-name> https://cache.nixos.org
+trusted-public-keys = <cache-name>:<your-attic-public-key>
 ```
 
 ## 4) Proxy-First Dependencies (Strongly Recommended)
@@ -56,12 +60,16 @@ So baseline agent policy can allow them without widening everything else.
 Optional example manifests:
 - `k8s/optional/package-proxy-verdaccio.yaml` (npm proxy/cache)
 - `k8s/optional/package-proxy-athens.yaml` (Go module proxy)
+- `k8s/optional/package-proxy-cargo.yaml` (Cargo sparse index + crate download proxy/cache)
 
 Example client config:
 - npm:
   - `npm config set registry http://verdaccio.workspaces-system.svc.cluster.local:4873`
 - Go:
   - `export GOPROXY=http://athens.workspaces-system.svc.cluster.local:3000,direct`
+- Cargo (sparse):
+  - `export CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse`
+  - `export CARGO_REGISTRIES_CRATES_IO_INDEX=sparse+http://cargo-proxy.workspaces-system.svc.cluster.local:8080/index/`
 
 ## 5) Tighten DNS (Prevent “Free Exfil”)
 

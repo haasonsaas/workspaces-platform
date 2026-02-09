@@ -46,6 +46,8 @@ type server struct {
 	webhookToken string
 
 	gh *githubService
+
+	netPolicy networkGrantPolicy
 }
 
 func main() {
@@ -97,6 +99,11 @@ func main() {
 		log.Printf("github integration disabled: %v", ghErr)
 	}
 
+	netPolicy, err := newNetworkGrantPolicyFromEnv()
+	if err != nil {
+		log.Fatalf("network policy: %v", err)
+	}
+
 	s := &server{
 		k8s:          k8sClient,
 		scheme:       scheme,
@@ -108,6 +115,7 @@ func main() {
 		audit:        auditEmitter,
 		artifacts:    artifactStore,
 		redactor:     redact.NewDefault(),
+		netPolicy:    netPolicy,
 	}
 
 	r := chi.NewRouter()
@@ -210,6 +218,37 @@ func (s *server) handleCreateNetworkGrant(w http.ResponseWriter, r *http.Request
 	}
 	if req.Protocol == "" {
 		req.Protocol = workspacesv1alpha1.NetworkGrantProtocolTCP
+	}
+
+	// Proxy-first guardrail: non-admin callers may only request egress to internal
+	// destinations (or explicitly allowlisted public hosts).
+	if !s.isAdmin(r) {
+		spec := workspacesv1alpha1.NetworkGrantSpec{
+			PolicyMode:  req.PolicyMode,
+			Protocol:    req.Protocol,
+			Egress:      req.Egress,
+			DNSAllow:    req.DNSAllow,
+			AllowNon443: req.AllowNon443,
+		}
+		if err := s.netPolicy.validateNonAdminNetworkGrant(spec); err != nil {
+			if s.audit != nil {
+				reqID := middleware.GetReqID(ctx)
+				s.audit.Emit("networkgrant.request_denied", map[string]any{
+					"request_id":      reqID,
+					"remote_addr":     r.RemoteAddr,
+					"namespace":       strings.TrimSpace(req.Namespace),
+					"agentjob":        strings.TrimSpace(req.AgentJob),
+					"egress_count":    len(req.Egress),
+					"dns_allow_count": len(req.DNSAllow),
+					"error":           err.Error(),
+				})
+			}
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"error":  "network_policy_denied",
+				"detail": err.Error(),
+			})
+			return
+		}
 	}
 
 	ng := &workspacesv1alpha1.NetworkGrant{
@@ -393,6 +432,31 @@ func (s *server) handleApproveNetworkGrantGitHub(w http.ResponseWriter, r *http.
 	if err := s.k8s.Get(ctx, client.ObjectKey{Namespace: ns, Name: name}, &ng); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "not_found"})
 		return
+	}
+
+	// Proxy-first guardrail: webhook-based approvals (PR comments) cannot approve
+	// public internet egress unless the hostnames are explicitly allowlisted.
+	// Admin can always override via the admin approval endpoint.
+	if !s.isAdmin(r) {
+		if err := s.netPolicy.validateNonAdminNetworkGrant(ng.Spec); err != nil {
+			if s.audit != nil {
+				reqID := middleware.GetReqID(ctx)
+				s.audit.Emit("networkgrant.approve_denied", map[string]any{
+					"request_id":  reqID,
+					"remote_addr": r.RemoteAddr,
+					"namespace":   ng.Namespace,
+					"name":        ng.Name,
+					"approved_by": strings.TrimSpace(body.ApprovedBy),
+					"via":         "github",
+					"error":       err.Error(),
+				})
+			}
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"error":  "network_policy_denied",
+				"detail": err.Error(),
+			})
+			return
+		}
 	}
 
 	ngPatch := client.MergeFrom(ng.DeepCopy())
@@ -825,6 +889,14 @@ echo "No .workspaces/agent.sh found; nothing to do."
 	}
 
 	writeJSON(w, http.StatusCreated, aj)
+}
+
+func (s *server) isAdmin(r *http.Request) bool {
+	if s.adminToken == "" {
+		return false
+	}
+	got := strings.TrimSpace(r.Header.Get("X-Broker-Admin-Token"))
+	return got != "" && got == s.adminToken
 }
 
 func (s *server) requireAdmin(r *http.Request) error {

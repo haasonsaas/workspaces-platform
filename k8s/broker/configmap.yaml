@@ -4,6 +4,12 @@ metadata:
   name: capability-broker-config
   namespace: workspaces-system
 data:
+  # NetworkGrant guardrails (proxy-first by default).
+  broker_network_public_egress_mode: "deny" # deny|allow
+  broker_network_public_egress_allowlist: "" # CSV exact public hostnames
+  broker_network_public_dns_allowlist: "" # CSV exact DNS names allowed in dnsAllow
+  broker_network_internal_suffix_allowlist: "svc.cluster.local,cluster.local"
+
   # Comma-separated allowlist of owner/repo entries. Empty => GitHub integration disabled (secure default).
   github_repo_allowlist: ""
 
