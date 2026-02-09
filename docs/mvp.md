@@ -44,7 +44,7 @@ Then add allowlists for:
 - `capability-broker` service
 - MinIO
 - package proxies / registries
-- GitHub (or internal git mirror)
+- GitHub (or internal git mirror), ideally via proxies and/or scoped `NetworkGrant`s
 
 ## 4. Create A Desktop
 
@@ -79,6 +79,12 @@ The operator creates a `Job` (`agentjob-<name>`) with:
 `NetworkGrant` is the primitive for "unlock this destination for this job for N minutes".
 The operator translates it to a `CiliumNetworkPolicy` named `netgrant-<grant>`.
 
+MVP schema constraints (enforced by controller):
+- exact FQDN only (no wildcards)
+- TCP only
+- 443-only by default (set `allowNon443: true` to permit non-443)
+- `purpose` is required on every `NetworkGrant`
+
 MVP approval flow:
 - broker (or admin) creates `NetworkGrant` with `approved=false`
 - approver flips it to `approved=true` (+ `ttlSeconds`, `approvedBy`, `reason`)
@@ -99,6 +105,10 @@ Broker does:
 `cmd/capability-broker` exists in this repo and exposes:
 - `POST /v1/network-grants` (create unapproved grant request)
 - `POST /v1/network-grants/{namespace}/{name}/approve` (admin approve)
+
+MVP auth:
+- agent-facing endpoints require `X-Broker-Agent-Token` (or admin token)
+- approval endpoints require `X-Broker-Admin-Token`
 
 `POST /v1/github/open-pr` is implemented using a GitHub App installation token. To enable it, configure:
 - `capability-broker-github-app` Secret (keys: `app_id`, `installation_id`, `private-key.pem`)

@@ -4,8 +4,23 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+type NetworkGrantPolicyMode string
+
+const (
+	// NetworkGrantPolicyModeStrictFQDN allows exact FQDN egress rules via Cilium toFQDNs.matchName.
+	NetworkGrantPolicyModeStrictFQDN NetworkGrantPolicyMode = "STRICT_FQDN"
+)
+
+type NetworkGrantProtocol string
+
+const (
+	// NetworkGrantProtocolTCP is the only supported protocol in the MVP.
+	NetworkGrantProtocolTCP NetworkGrantProtocol = "TCP"
+)
+
 type NetworkGrantEgressRule struct {
 	// Host is a DNS name allowed for egress (Cilium FQDN policy).
+	// MVP: exact match only (no wildcards).
 	Host string `json:"host"`
 
 	// Ports are allowed TCP ports. If empty, defaults to [443].
@@ -16,8 +31,25 @@ type NetworkGrantSpec struct {
 	// PodSelector selects the pods this grant applies to.
 	PodSelector metav1.LabelSelector `json:"podSelector"`
 
+	// PolicyMode selects how egress rules are interpreted.
+	// MVP: STRICT_FQDN only.
+	// +kubebuilder:validation:Enum=STRICT_FQDN
+	PolicyMode NetworkGrantPolicyMode `json:"policyMode,omitempty"`
+
+	// Protocol is currently TCP only.
+	// +kubebuilder:validation:Enum=TCP
+	Protocol NetworkGrantProtocol `json:"protocol,omitempty"`
+
+	// Purpose is a human-readable justification for the access request.
+	// +kubebuilder:validation:MinLength=1
+	Purpose string `json:"purpose"`
+
 	// Egress destinations to allow.
-	Egress []NetworkGrantEgressRule `json:"egress,omitempty"`
+	// +kubebuilder:validation:MinItems=1
+	Egress []NetworkGrantEgressRule `json:"egress"`
+
+	// AllowNon443 allows non-443 ports in egress rules. Defaults to false.
+	AllowNon443 bool `json:"allowNon443,omitempty"`
 
 	// TTLSeconds is how long this grant remains active after approval.
 	TTLSeconds int32 `json:"ttlSeconds,omitempty"`

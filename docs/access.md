@@ -6,33 +6,13 @@ Lock: private access via Tailscale; no public SSH.
 
 VS Code Remote connects to the desktop's `sshd`, but the desktop is only reachable from inside the cluster.
 
-## MVP Option A (Fastest): Gateway Can Reach Cluster DNS + Services
+## Default Path (Recommended): `ws-proxy` (K8s Port-Forward)
 
-If your gateway host can resolve `*.svc.cluster.local` and reach the cluster Service network (or you run the gateway *inside* the cluster), you can use a plain SSH `ProxyCommand` that pipes bytes through the gateway:
+Do **not** make the gateway routable to `ClusterIP` services by default. It’s convenient, but it couples your edge box into the cluster network plane and expands lateral movement surface if the gateway is ever compromised.
 
-```sshconfig
-Host ws-gateway
-  HostName <tailscale-ip-or-hostname>
-  User <tailscale-ssh-user>
+Instead, default to a gateway that only talks to the Kubernetes API and uses port-forwarding to reach the target pod.
 
-Host desk-jonathan
-  HostName desktop-jonathan-ssh.desktops.svc.cluster.local
-  User jonathan
-  ProxyCommand ssh ws-gateway -- nc %h %p
-  StrictHostKeyChecking accept-new
-```
-
-This works even when the gateway is using Tailscale SSH, because it doesn't require SSH port forwarding; it just executes `nc` on the gateway.
-
-## MVP Option B: Gateway Outside Cluster (No Service Routing)
-
-If the gateway cannot reach cluster Services directly, the clean approach is:
-- gateway has access to the Kubernetes API
-- gateway runs a small "TCP proxy" command that uses the K8s API (port-forward) and then shuttles stdin/stdout
-
-That command can be used in `ProxyCommand` the same way as `nc`.
-
-This repo implements it as `ws-proxy` (`cmd/ws-proxy`).
+This repo implements the TCP shuttling helper as `ws-proxy` (`cmd/ws-proxy`).
 
 Example SSH config:
 ```sshconfig
@@ -53,3 +33,17 @@ Gateway kubeconfig RBAC needs (minimum):
 - `get` Services in the desktop namespaces
 - `list` Pods in the desktop namespaces
 - `create` on `pods/portforward` in the desktop namespaces
+
+## Privileged Mode (Optional): Gateway Can Route To `ClusterIP`
+
+If you still want the “simple” flow where the gateway can resolve `*.svc.cluster.local` and route to `ClusterIP`, treat it as a more privileged gateway mode with separate hardening and monitoring.
+
+Example (not recommended as the default):
+```sshconfig
+Host desk-jonathan
+  HostName desktop-jonathan-ssh.desktops.svc.cluster.local
+  User jonathan
+  ProxyCommand ssh ws-gateway -- nc %h %p
+```
+
+If you enable this mode, assume that compromising the gateway meaningfully increases the blast radius.

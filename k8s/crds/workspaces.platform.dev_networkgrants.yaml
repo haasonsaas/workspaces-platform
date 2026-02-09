@@ -39,6 +39,10 @@ spec:
             type: object
           spec:
             properties:
+              allowNon443:
+                description: AllowNon443 allows non-443 ports in egress rules. Defaults
+                  to false.
+                type: boolean
               approved:
                 description: Approved gates whether the grant should be enforced.
                 type: boolean
@@ -49,8 +53,9 @@ spec:
                 items:
                   properties:
                     host:
-                      description: Host is a DNS name allowed for egress (Cilium FQDN
-                        policy).
+                      description: |-
+                        Host is a DNS name allowed for egress (Cilium FQDN policy).
+                        MVP: exact match only (no wildcards).
                       type: string
                     ports:
                       description: Ports are allowed TCP ports. If empty, defaults
@@ -62,6 +67,7 @@ spec:
                   required:
                   - host
                   type: object
+                minItems: 1
                 type: array
               podSelector:
                 description: PodSelector selects the pods this grant applies to.
@@ -109,6 +115,23 @@ spec:
                     type: object
                 type: object
                 x-kubernetes-map-type: atomic
+              policyMode:
+                description: |-
+                  PolicyMode selects how egress rules are interpreted.
+                  MVP: STRICT_FQDN only.
+                enum:
+                - STRICT_FQDN
+                type: string
+              protocol:
+                description: Protocol is currently TCP only.
+                enum:
+                - TCP
+                type: string
+              purpose:
+                description: Purpose is a human-readable justification for the access
+                  request.
+                minLength: 1
+                type: string
               reason:
                 type: string
               ttlSeconds:
@@ -117,7 +140,9 @@ spec:
                 format: int32
                 type: integer
             required:
+            - egress
             - podSelector
+            - purpose
             type: object
           status:
             properties:

@@ -30,7 +30,7 @@ The platform must enforce:
 - `internal/controller/`: reconcilers.
 - `cmd/workspaces-operator/`: controller-manager binary.
 - `cmd/capability-broker/`: capability broker HTTP API (network unlocks; GitHub PR creation is implemented here).
-- `cmd/ws-proxy/`: gateway helper for SSH `ProxyCommand` when the gateway cannot route directly to ClusterIP Services.
+- `cmd/ws-proxy/`: gateway helper for SSH `ProxyCommand` (default: K8s port-forward; see `docs/access.md`).
 - `k8s/`: kustomize base (CRDs, namespaces, operator, broker, baseline policies).
 - `images/`: Dockerfiles for reference images.
 - `docs/`: system docs.
@@ -73,9 +73,15 @@ Creates a Kubernetes `Job` (typically on Kata via `runtimeClassName`), with:
 
 Primitive for approvals:
 - select target pods by labels
-- allow a set of FQDN destinations + ports
+- allow a set of **exact FQDN** destinations + ports (443-only by default)
 - TTL enforced by the controller
 - translates to `CiliumNetworkPolicy`
+
+MVP constraints (enforced by controller):
+- `policyMode`: `STRICT_FQDN` only
+- `protocol`: `TCP` only
+- `purpose` is required
+- non-443 ports require `allowNon443: true`
 
 ## Capability Broker (Choke Point)
 
@@ -89,6 +95,10 @@ Rules:
 - Never hand agents GitHub write tokens.
 - Never print tokens/credentials in logs.
 - If capturing agent output, do secret redaction by default.
+
+Auth (MVP):
+- Agent-facing endpoints require `X-Broker-Agent-Token` (or admin token).
+- Approval endpoints require `X-Broker-Admin-Token`.
 
 ## GitHub App Integration (Broker-Only Writes)
 
@@ -109,7 +119,7 @@ Policy:
 Agents default-deny egress.
 
 Pattern:
-1. baseline policy allows DNS + broker + required public endpoints (ideally only your proxies).
+1. baseline policy allows DNS + broker (and ideally only your internal proxies).
 2. agent requests additional destination via broker.
 3. approver grants `NetworkGrant` scoped to job labels + TTL.
 4. controller enforces via Cilium FQDN egress policy and revokes on expiry.
@@ -118,9 +128,11 @@ Pattern:
 
 Day 1 access is via a Tailscale SSH gateway.
 
-Two modes:
+Default mode:
+- Use `ws-proxy` on the gateway to port-forward to the desktop Pod (Kubernetes API mediated) and shuttle bytes.
+
+Privileged mode (optional):
 - Gateway can route to ClusterIP Services directly: use `ProxyCommand ... nc %h %p` and point HostName at the `*.svc.cluster.local` Service.
-- Gateway cannot route to ClusterIP Services: use `ws-proxy` on the gateway to port-forward to the desktop Pod and shuttle bytes.
 
 See: `docs/access.md`.
 
@@ -154,4 +166,3 @@ kubectl apply -k k8s
 - Any design that requires privileged containers for the default fleet is wrong.
 - Do not add "temporary" bypasses (open egress, host mounts, docker.sock) without a distinct profile, isolated node pool, and heavier auditing.
 - Prefer boring, inspectable primitives over clever magic (K8s resources, Cilium policies, GitHub App).
-

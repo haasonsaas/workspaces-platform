@@ -18,3 +18,9 @@ data:
   github_git_author_name: "workspaces-broker"
   github_git_author_email: "workspaces-broker@localhost"
 
+  # Patch safety limits (defense-in-depth).
+  github_max_files_changed: "100"
+  github_allow_binary_patches: "false"
+  github_sensitive_path_prefix_denylist: ".github/workflows/,infra/,terraform/,deploy/"
+  # Comma-separated owner/repo allowlist that may touch sensitive paths.
+  github_sensitive_path_allowlist_repos: ""

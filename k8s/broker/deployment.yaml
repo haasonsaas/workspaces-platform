@@ -21,6 +21,13 @@ spec:
           env:
             - name: LISTEN_ADDR
               value: ":8080"
+            # Required for agent-facing endpoints (/v1/network-grants, /v1/github/open-pr).
+            - name: BROKER_AGENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: capability-broker-secrets
+                  key: agent_token
+                  optional: true
             # Optional: set to require admin auth for approval endpoints.
             - name: BROKER_ADMIN_TOKEN
               valueFrom:
@@ -78,6 +85,30 @@ spec:
                 configMapKeyRef:
                   name: capability-broker-config
                   key: github_git_author_email
+                  optional: true
+            - name: GITHUB_MAX_FILES_CHANGED
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: github_max_files_changed
+                  optional: true
+            - name: GITHUB_ALLOW_BINARY_PATCHES
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: github_allow_binary_patches
+                  optional: true
+            - name: GITHUB_SENSITIVE_PATH_PREFIX_DENYLIST
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: github_sensitive_path_prefix_denylist
+                  optional: true
+            - name: GITHUB_SENSITIVE_PATH_ALLOWLIST_REPOS
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: github_sensitive_path_allowlist_repos
                   optional: true
           ports:
             - name: http

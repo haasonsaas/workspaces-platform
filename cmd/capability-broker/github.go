@@ -44,6 +44,14 @@ type githubService struct {
 	authorName  string
 	authorEmail string
 
+	// Patch safety limits.
+	maxFilesChanged    int
+	allowBinaryPatches bool
+
+	// Sensitive paths are denied by default unless the repo is explicitly allowlisted.
+	sensitivePathPrefixDenylist []string
+	sensitivePathAllowlistRepos map[string]struct{}
+
 	httpClient *http.Client
 
 	mu           sync.Mutex
@@ -96,21 +104,39 @@ func newGitHubServiceFromEnv() (*githubService, error) {
 	authorName := getenv("GITHUB_GIT_AUTHOR_NAME", "workspaces-broker")
 	authorEmail := getenv("GITHUB_GIT_AUTHOR_EMAIL", "workspaces-broker@localhost")
 
+	maxFilesChanged := 100
+	if raw := strings.TrimSpace(getenv("GITHUB_MAX_FILES_CHANGED", "100")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			return nil, errors.New("GITHUB_MAX_FILES_CHANGED must be a positive integer")
+		}
+		maxFilesChanged = n
+	}
+
+	sensitiveDeny := parseCSVList(getenv("GITHUB_SENSITIVE_PATH_PREFIX_DENYLIST", ".github/workflows/,infra/,terraform/,deploy/"))
+	sensitiveAllowRepos := parseCSVSet(os.Getenv("GITHUB_SENSITIVE_PATH_ALLOWLIST_REPOS"))
+
+	allowBinary := strings.EqualFold(strings.TrimSpace(getenv("GITHUB_ALLOW_BINARY_PATCHES", "false")), "true")
+
 	return &githubService{
-		apiBase:        apiBase,
-		gitBase:        gitBase,
-		appID:          appID,
-		installationID: installationID,
-		privateKey:     key,
-		repoAllowlist:  repoAllowlist,
-		defaultBase:    defaultBase,
-		allowedBases:   allowedBases,
-		branchPrefix:   branchPrefix,
-		authorName:     authorName,
-		authorEmail:    authorEmail,
-		httpClient:     &http.Client{Timeout: 30 * time.Second},
-		cachedToken:    "",
-		cachedExpiry:   time.Time{},
+		apiBase:                     apiBase,
+		gitBase:                     gitBase,
+		appID:                       appID,
+		installationID:              installationID,
+		privateKey:                  key,
+		repoAllowlist:               repoAllowlist,
+		defaultBase:                 defaultBase,
+		allowedBases:                allowedBases,
+		branchPrefix:                branchPrefix,
+		authorName:                  authorName,
+		authorEmail:                 authorEmail,
+		maxFilesChanged:             maxFilesChanged,
+		allowBinaryPatches:          allowBinary,
+		sensitivePathPrefixDenylist: sensitiveDeny,
+		sensitivePathAllowlistRepos: sensitiveAllowRepos,
+		httpClient:                  &http.Client{Timeout: 30 * time.Second},
+		cachedToken:                 "",
+		cachedExpiry:                time.Time{},
 	}, nil
 }
 
@@ -173,6 +199,18 @@ func parseCSVSet(csv string) map[string]struct{} {
 	return out
 }
 
+func parseCSVList(csv string) []string {
+	out := []string{}
+	for _, part := range strings.Split(csv, ",") {
+		s := strings.TrimSpace(part)
+		if s == "" {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
 type githubOpenPRRequest struct {
 	Repo string `json:"repo"` // owner/repo
 
@@ -205,6 +243,11 @@ func (s *server) handleGitHubOpenPR(w http.ResponseWriter, r *http.Request) {
 			"error": "github_disabled",
 			"hint":  "Configure GITHUB_APP_* env vars and GITHUB_REPO_ALLOWLIST to enable broker-only PR creation.",
 		})
+		return
+	}
+
+	if err := s.requireAgent(r); err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
 		return
 	}
 
@@ -365,9 +408,42 @@ func (g *githubService) openPRFromPatch(ctx context.Context, r *http.Request, re
 	if err := runGit(ctx, repoDir, env, "checkout", "-b", branch); err != nil {
 		return nil, err
 	}
-	if err := runGit(ctx, repoDir, env, "apply", "--index", "--binary", "--whitespace=nowarn", patchPath); err != nil {
+	// Apply patch into the index. Fail closed for binary patches unless explicitly enabled.
+	applyArgs := []string{"apply", "--index", "--whitespace=nowarn"}
+	if g.allowBinaryPatches {
+		applyArgs = append(applyArgs, "--binary")
+	}
+	applyArgs = append(applyArgs, patchPath)
+	if err := runGit(ctx, repoDir, env, applyArgs...); err != nil {
 		return nil, httpError{Status: http.StatusBadRequest, Code: "patch_apply_failed", Err: err}
 	}
+
+	changedFiles, err := g.changedFiles(ctx, repoDir, env)
+	if err != nil {
+		return nil, err
+	}
+	if len(changedFiles) == 0 {
+		return nil, httpError{Status: http.StatusBadRequest, Code: "patch_noop"}
+	}
+	if g.maxFilesChanged > 0 && len(changedFiles) > g.maxFilesChanged {
+		return nil, httpError{Status: http.StatusBadRequest, Code: "patch_too_many_files"}
+	}
+	if err := g.enforceSensitivePathDenylist(repo, changedFiles); err != nil {
+		return nil, err
+	}
+	if !g.allowBinaryPatches {
+		hasBinary, err := gitIndexHasBinaryDiff(ctx, repoDir, env)
+		if err != nil {
+			return nil, err
+		}
+		if hasBinary {
+			return nil, httpError{Status: http.StatusBadRequest, Code: "patch_binary_not_allowed"}
+		}
+	}
+	if err := gitDiffCheck(ctx, repoDir, env); err != nil {
+		return nil, err
+	}
+
 	if err := runGit(ctx, repoDir, env, "commit", "-m", commitMsg, "--no-gpg-sign"); err != nil {
 		return nil, httpError{Status: http.StatusBadRequest, Code: "commit_failed", Err: err}
 	}
@@ -382,16 +458,20 @@ func (g *githubService) openPRFromPatch(ctx context.Context, r *http.Request, re
 	}
 
 	reqID := middleware.GetReqID(ctx)
+	touchedFiles, truncated := truncateStrings(changedFiles, 50)
 	auditEvent("github.open_pr", map[string]any{
-		"request_id":     reqID,
-		"remote_addr":    r.RemoteAddr,
-		"repo":           repo,
-		"base":           base,
-		"branch":         branch,
-		"pr_number":      prNum,
-		"pr_url":         prURL,
-		"patch_sha256":   patchHashHex,
-		"commit_message": commitMsg,
+		"request_id":              reqID,
+		"remote_addr":             r.RemoteAddr,
+		"repo":                    repo,
+		"base":                    base,
+		"branch":                  branch,
+		"pr_number":               prNum,
+		"pr_url":                  prURL,
+		"patch_sha256":            patchHashHex,
+		"commit_message":          commitMsg,
+		"touched_files_count":     len(changedFiles),
+		"touched_files_truncated": truncated,
+		"touched_files":           touchedFiles,
 	})
 
 	return &githubOpenPRResponse{
@@ -402,6 +482,104 @@ func (g *githubService) openPRFromPatch(ctx context.Context, r *http.Request, re
 		URL:         prURL,
 		PatchSHA256: patchHashHex,
 	}, nil
+}
+
+func (g *githubService) changedFiles(ctx context.Context, repoDir string, env []string) ([]string, error) {
+	out, err := runGitOutput(ctx, repoDir, env, "diff", "--cached", "--name-only")
+	if err != nil {
+		return nil, err
+	}
+	files := splitNonEmptyLines(out)
+	for _, f := range files {
+		if strings.HasPrefix(f, "/") || strings.Contains(f, "..") {
+			return nil, httpError{Status: http.StatusBadRequest, Code: "patch_invalid_path"}
+		}
+	}
+	return files, nil
+}
+
+func (g *githubService) enforceSensitivePathDenylist(repo string, changed []string) error {
+	if len(g.sensitivePathPrefixDenylist) == 0 {
+		return nil
+	}
+	if _, ok := g.sensitivePathAllowlistRepos[repo]; ok {
+		return nil
+	}
+	for _, f := range changed {
+		if matchesAnyPrefix(f, g.sensitivePathPrefixDenylist) {
+			return httpError{Status: http.StatusBadRequest, Code: "patch_touches_sensitive_paths"}
+		}
+	}
+	return nil
+}
+
+func matchesAnyPrefix(path string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if pathMatchesPrefix(path, p) {
+			return true
+		}
+	}
+	return false
+}
+
+func pathMatchesPrefix(path, prefix string) bool {
+	p := strings.TrimSpace(prefix)
+	if p == "" {
+		return false
+	}
+	if strings.HasSuffix(p, "/") {
+		dir := strings.TrimSuffix(p, "/")
+		return path == dir || strings.HasPrefix(path, p)
+	}
+	return path == p || strings.HasPrefix(path, p+"/")
+}
+
+func gitDiffCheck(ctx context.Context, repoDir string, env []string) error {
+	out, err := runGitOutput(ctx, repoDir, env, "diff", "--cached", "--check")
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(out) == "" {
+		return nil
+	}
+	return httpError{Status: http.StatusBadRequest, Code: "patch_diff_check_failed"}
+}
+
+func gitIndexHasBinaryDiff(ctx context.Context, repoDir string, env []string) (bool, error) {
+	out, err := runGitOutput(ctx, repoDir, env, "diff", "--cached", "--numstat")
+	if err != nil {
+		return false, err
+	}
+	for _, line := range splitNonEmptyLines(out) {
+		parts := strings.Split(line, "\t")
+		if len(parts) < 3 {
+			continue
+		}
+		if parts[0] == "-" && parts[1] == "-" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func splitNonEmptyLines(s string) []string {
+	raw := strings.Split(s, "\n")
+	out := make([]string, 0, len(raw))
+	for _, line := range raw {
+		t := strings.TrimSpace(line)
+		if t == "" {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+func truncateStrings(in []string, n int) (out []string, truncated bool) {
+	if n <= 0 || len(in) <= n {
+		return in, false
+	}
+	return in[:n], true
 }
 
 func brokerGitEnv(tmpDir, askpassPath, token string) []string {
@@ -444,6 +622,22 @@ func runGit(ctx context.Context, dir string, extraEnv []string, args ...string) 
 		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, msg)
 	}
 	return nil
+}
+
+func runGitOutput(ctx context.Context, dir string, extraEnv []string, args ...string) (string, error) {
+	cmd := execCommand(ctx, "git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), extraEnv...)
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if len(msg) > 8<<10 {
+			msg = msg[:8<<10] + "...(truncated)"
+		}
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, msg)
+	}
+	return string(out), nil
 }
 
 func splitRepo(repo string) (owner string, name string, _ error) {

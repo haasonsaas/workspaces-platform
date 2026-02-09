@@ -3,9 +3,12 @@ package controller
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -20,6 +23,8 @@ type NetworkGrantReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 }
+
+const networkGrantCondSpecValid = "SpecValid"
 
 func (r *NetworkGrantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var grant workspacesv1alpha1.NetworkGrant
@@ -36,6 +41,20 @@ func (r *NetworkGrantReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	cnp.SetKind("CiliumNetworkPolicy")
 	cnp.SetNamespace(grant.Namespace)
 	cnp.SetName(cnpName)
+
+	// Validate spec. Without an admission webhook, the controller must ensure
+	// invalid requests never produce enforceable network policy.
+	if err := validateNetworkGrantSpec(&grant); err != nil {
+		_ = r.Delete(ctx, cnp)
+		if grant.Status.Active {
+			patch := client.MergeFrom(grant.DeepCopy())
+			grant.Status.Active = false
+			_ = r.Status().Patch(ctx, &grant, patch)
+		}
+		_ = r.setNetworkGrantSpecValidCondition(ctx, &grant, false, "ValidationFailed", err.Error())
+		return ctrl.Result{}, nil
+	}
+	_ = r.setNetworkGrantSpecValidCondition(ctx, &grant, true, "Valid", "spec is valid")
 
 	// If not approved, ensure policy doesn't exist.
 	if !grant.Spec.Approved {
@@ -115,9 +134,87 @@ func (r *NetworkGrantReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
+func validateNetworkGrantSpec(grant *workspacesv1alpha1.NetworkGrant) error {
+	// Selector must be explicit and stable (MVP keeps it simple: matchLabels only).
+	if len(grant.Spec.PodSelector.MatchExpressions) != 0 {
+		return fmt.Errorf("podSelector.matchExpressions not supported; use matchLabels only")
+	}
+	if len(grant.Spec.PodSelector.MatchLabels) == 0 {
+		return fmt.Errorf("podSelector.matchLabels is required")
+	}
+
+	purpose := strings.TrimSpace(grant.Spec.Purpose)
+	if purpose == "" {
+		return fmt.Errorf("purpose is required")
+	}
+
+	if grant.Spec.Approved && strings.TrimSpace(grant.Spec.ApprovedBy) == "" {
+		return fmt.Errorf("approvedBy is required when approved is true")
+	}
+
+	mode := grant.Spec.PolicyMode
+	if mode == "" {
+		mode = workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN
+	}
+	if mode != workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN {
+		return fmt.Errorf("policyMode %q is not supported (MVP supports STRICT_FQDN only)", mode)
+	}
+
+	proto := grant.Spec.Protocol
+	if proto == "" {
+		proto = workspacesv1alpha1.NetworkGrantProtocolTCP
+	}
+	if proto != workspacesv1alpha1.NetworkGrantProtocolTCP {
+		return fmt.Errorf("protocol %q is not supported (MVP supports TCP only)", proto)
+	}
+
+	if len(grant.Spec.Egress) == 0 {
+		return fmt.Errorf("egress must contain at least one destination")
+	}
+
+	for i, r := range grant.Spec.Egress {
+		host := strings.TrimSpace(r.Host)
+		if host == "" {
+			return fmt.Errorf("egress[%d].host is required", i)
+		}
+		if strings.ContainsAny(host, " \t\r\n") {
+			return fmt.Errorf("egress[%d].host must not contain whitespace", i)
+		}
+		if strings.Contains(host, "*") {
+			return fmt.Errorf("egress[%d].host must be an exact FQDN (no wildcards)", i)
+		}
+		if strings.ContainsAny(host, "/:") {
+			return fmt.Errorf("egress[%d].host must be a hostname only (no scheme/path/port)", i)
+		}
+		if strings.HasPrefix(host, ".") || strings.HasSuffix(host, ".") {
+			return fmt.Errorf("egress[%d].host must not start or end with '.'", i)
+		}
+		if len(host) > 253 {
+			return fmt.Errorf("egress[%d].host is too long", i)
+		}
+
+		ports := r.Ports
+		if len(ports) == 0 {
+			ports = []int32{443}
+		}
+		for _, p := range ports {
+			if p <= 0 || p > 65535 {
+				return fmt.Errorf("egress[%d] has invalid port %d", i, p)
+			}
+			if !grant.Spec.AllowNon443 && p != 443 {
+				return fmt.Errorf("egress[%d] requests non-443 port %d but allowNon443 is false", i, p)
+			}
+		}
+	}
+
+	return nil
+}
+
 func buildCiliumEgress(rules []workspacesv1alpha1.NetworkGrantEgressRule) []any {
 	out := make([]any, 0, len(rules))
 	for _, r := range rules {
+		// Validation ensures host is already exact; keep a canonical lower-case matchName.
+		host := strings.ToLower(strings.TrimSpace(r.Host))
 		ports := r.Ports
 		if len(ports) == 0 {
 			ports = []int32{443}
@@ -127,9 +224,34 @@ func buildCiliumEgress(rules []workspacesv1alpha1.NetworkGrantEgressRule) []any 
 			ps = append(ps, map[string]any{"port": fmt.Sprintf("%d", p), "protocol": "TCP"})
 		}
 		out = append(out, map[string]any{
-			"toFQDNs": []any{map[string]any{"matchName": r.Host}},
+			"toFQDNs": []any{map[string]any{"matchName": host}},
 			"toPorts": []any{map[string]any{"ports": ps}},
 		})
 	}
 	return out
+}
+
+func (r *NetworkGrantReconciler) setNetworkGrantSpecValidCondition(ctx context.Context, grant *workspacesv1alpha1.NetworkGrant, ok bool, reason, message string) error {
+	condStatus := metav1.ConditionFalse
+	if ok {
+		condStatus = metav1.ConditionTrue
+	}
+
+	desired := metav1.Condition{
+		Type:               networkGrantCondSpecValid,
+		Status:             condStatus,
+		Reason:             reason,
+		Message:            message,
+		ObservedGeneration: grant.GetGeneration(),
+		LastTransitionTime: metav1.Now(),
+	}
+
+	before := grant.DeepCopy()
+	meta.SetStatusCondition(&grant.Status.Conditions, desired)
+	if reflect.DeepEqual(before.Status.Conditions, grant.Status.Conditions) {
+		return nil
+	}
+
+	patch := client.MergeFrom(before)
+	return r.Status().Patch(ctx, grant, patch)
 }

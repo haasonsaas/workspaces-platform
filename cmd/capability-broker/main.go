@@ -24,6 +24,7 @@ import (
 type server struct {
 	k8s client.Client
 
+	agentToken string
 	adminToken string
 
 	gh *githubService
@@ -32,6 +33,7 @@ type server struct {
 func main() {
 	var (
 		listenAddr = getenv("LISTEN_ADDR", ":8080")
+		agentToken = os.Getenv("BROKER_AGENT_TOKEN")
 		adminToken = os.Getenv("BROKER_ADMIN_TOKEN")
 	)
 
@@ -51,6 +53,7 @@ func main() {
 	}
 
 	s := &server{k8s: k8sClient, adminToken: adminToken, gh: ghSvc}
+	s.agentToken = agentToken
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -80,7 +83,13 @@ type createNetworkGrantRequest struct {
 
 	PodSelector map[string]string `json:"podSelector"`
 
+	PolicyMode workspacesv1alpha1.NetworkGrantPolicyMode `json:"policyMode,omitempty"`
+	Protocol   workspacesv1alpha1.NetworkGrantProtocol   `json:"protocol,omitempty"`
+	Purpose    string                                    `json:"purpose"`
+
 	Egress []workspacesv1alpha1.NetworkGrantEgressRule `json:"egress,omitempty"`
+
+	AllowNon443 bool `json:"allowNon443,omitempty"`
 
 	TTLSeconds int32 `json:"ttlSeconds,omitempty"`
 
@@ -88,6 +97,11 @@ type createNetworkGrantRequest struct {
 }
 
 func (s *server) handleCreateNetworkGrant(w http.ResponseWriter, r *http.Request) {
+	if err := s.requireAgent(r); err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+		return
+	}
+
 	ctx := r.Context()
 
 	var req createNetworkGrantRequest
@@ -103,6 +117,10 @@ func (s *server) handleCreateNetworkGrant(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "podSelector_required"})
 		return
 	}
+	if strings.TrimSpace(req.Purpose) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "purpose_required"})
+		return
+	}
 	if req.TTLSeconds == 0 {
 		req.TTLSeconds = 1800
 	}
@@ -113,7 +131,11 @@ func (s *server) handleCreateNetworkGrant(w http.ResponseWriter, r *http.Request
 		},
 		Spec: workspacesv1alpha1.NetworkGrantSpec{
 			PodSelector: metav1.LabelSelector{MatchLabels: req.PodSelector},
+			PolicyMode:  req.PolicyMode,
+			Protocol:    req.Protocol,
+			Purpose:     strings.TrimSpace(req.Purpose),
 			Egress:      req.Egress,
+			AllowNon443: req.AllowNon443,
 			TTLSeconds:  req.TTLSeconds,
 			Approved:    false,
 			Reason:      req.Reason,
@@ -193,6 +215,24 @@ func (s *server) requireAdmin(r *http.Request) error {
 	}
 	got := strings.TrimSpace(r.Header.Get("X-Broker-Admin-Token"))
 	if got == "" || got != s.adminToken {
+		return errors.New("invalid token")
+	}
+	return nil
+}
+
+func (s *server) requireAgent(r *http.Request) error {
+	// Admin token is a superset and may access agent endpoints too.
+	if s.adminToken != "" {
+		if strings.TrimSpace(r.Header.Get("X-Broker-Admin-Token")) == s.adminToken {
+			return nil
+		}
+	}
+
+	if s.agentToken == "" {
+		return errors.New("agent token not configured")
+	}
+	got := strings.TrimSpace(r.Header.Get("X-Broker-Agent-Token"))
+	if got == "" || got != s.agentToken {
 		return errors.New("invalid token")
 	}
 	return nil

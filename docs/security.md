@@ -25,8 +25,7 @@ Agents are **default-deny egress**.
 Allowed by default:
 - DNS
 - capability broker
-- required package registries/proxies (prefer internal mirrors)
-- GitHub API/clone endpoints (or internal mirror)
+- required package registries/proxies (prefer internal mirrors; agents should use proxies by default)
 
 Everything else:
 - requires a `NetworkGrant` approval
@@ -35,6 +34,17 @@ Everything else:
 
 Implementation detail:
 - `NetworkGrant` → `CiliumNetworkPolicy` using `toFQDNs` + `toPorts`
+
+MVP constraints (enforced by controller; no admission webhook required):
+- exact FQDN only (no wildcards)
+- TCP only
+- 443-only by default (set `allowNon443: true` to permit non-443)
+- `purpose` required on every `NetworkGrant`
+
+Hard defaults:
+- agents are default-deny egress
+- deny cloud metadata endpoints (`169.254.169.254`, etc.)
+- do not allow direct public internet egress by default; prefer internal proxies/mirrors
 
 ## Capability Broker (Least Privilege)
 
@@ -80,4 +90,3 @@ Recommended next steps:
 - sign images (cosign) and enforce verification at admission
 - route dependency downloads through internal proxies/mirrors
 - use Nix flake locking for toolchain pinning
-

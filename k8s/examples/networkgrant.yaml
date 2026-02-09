@@ -4,9 +4,12 @@ metadata:
   name: example-github
   namespace: agents
 spec:
+  policyMode: STRICT_FQDN
+  protocol: TCP
   approved: true
   approvedBy: admin
   reason: "allow GitHub for this job"
+  purpose: "allow GitHub API access for fetching PR metadata"
   ttlSeconds: 1800
   podSelector:
     matchLabels:
@@ -17,4 +20,3 @@ spec:
       ports: [443]
     - host: api.github.com
       ports: [443]
-

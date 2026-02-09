@@ -7,6 +7,13 @@ spec:
   endpointSelector:
     matchLabels:
       workspaces.platform.dev/app: agent
+  egressDeny:
+    # Always deny common cloud metadata endpoints (even on-prem). If this ever
+    # becomes relevant, you want it to fail closed.
+    - toCIDRSet:
+        - cidr: 169.254.169.254/32
+        - cidr: 169.254.170.2/32
+        - cidr: fd00:ec2::254/128
   egress:
     # Allow DNS to kube-dns (adjust labels for your cluster if needed).
     - toEndpoints:
@@ -28,12 +35,7 @@ spec:
         - ports:
             - port: "8080"
               protocol: TCP
-    # Baseline public allowlist (example). Prefer routing registries through your own proxies.
-    - toFQDNs:
-        - matchName: github.com
-        - matchName: api.github.com
-      toPorts:
-        - ports:
-            - port: "443"
-              protocol: TCP
+    # MVP: do NOT allow direct public internet by default. Prefer internal
+    # package proxies/mirrors; everything else is unlocked per-job via
+    # NetworkGrant (STRICT_FQDN + 443-only by default).
   ingress: []

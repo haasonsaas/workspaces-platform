@@ -31,8 +31,8 @@ This document describes the target architecture for ephemeral employee dev deskt
                     (private)
    Laptop  ──Tailscale SSH──►  Gateway
                                │
-                               │ Option A: nc → ClusterIP Service
-                               │ Option B: ws-proxy → K8s port-forward
+                               │ Default: ws-proxy → K8s port-forward
+                               │ Privileged: nc → ClusterIP Service
                                ▼
                          Desktop Pod (sshd)
                          + home PVC
@@ -131,16 +131,20 @@ Security properties:
   - branch prefix (default `agent/`)
 - Broker logs audit events without storing patch bodies in logs.
 
+MVP auth:
+- Agent-facing endpoints require `X-Broker-Agent-Token` (or admin token).
+- Approval endpoints require `X-Broker-Admin-Token`.
+
 ### 3) Gateway (Tailscale Edge)
 
 Day 1: Tailscale SSH terminates user access on a single gateway.
 
 Desktop access patterns:
-- **Option A**: gateway can resolve and route to `*.svc.cluster.local` and ClusterIP Services
-  - `ProxyCommand ssh gateway -- nc %h %p`
-- **Option B**: gateway cannot route to ClusterIP Services
+- **Default (recommended)**: gateway does **not** route to ClusterIP Services
   - `ProxyCommand ssh gateway -- ws-proxy %h %p`
   - `ws-proxy` uses Kubernetes API port-forward to the backing pod and shuttles bytes.
+- **Privileged mode (optional)**: gateway can resolve and route to `*.svc.cluster.local` and ClusterIP Services
+  - `ProxyCommand ssh gateway -- nc %h %p`
 
 See `docs/access.md`.
 
@@ -177,6 +181,13 @@ Persistence model:
 3. Approver flips to `approved=true` with `ttlSeconds`, `approvedBy`, `reason`.
 4. Operator translates it into a `CiliumNetworkPolicy` scoped to that job’s labels.
 5. On expiry, operator deletes/invalidates the policy.
+
+MVP schema constraints (enforced by controller):
+- `policyMode`: `STRICT_FQDN` only
+- exact FQDNs only (no wildcards)
+- `protocol`: `TCP` only
+- ports: `443` only by default (set `allowNon443: true` to permit others)
+- `purpose` is required (human justification)
 
 ### GitHub PR (Broker-Only Writes)
 
