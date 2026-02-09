@@ -1,0 +1,54 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: workspaces-desktops-pod-hardening
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: desktops
+  validations:
+    - expression: "object.metadata.labels['workspaces.platform.dev/app'] != 'desktop' || (has(object.spec.automountServiceAccountToken) && object.spec.automountServiceAccountToken == false)"
+      message: "desktop pods must set spec.automountServiceAccountToken=false"
+    - expression: "object.metadata.labels['workspaces.platform.dev/app'] != 'desktop' || (has(object.spec.enableServiceLinks) && object.spec.enableServiceLinks == false)"
+      message: "desktop pods must set spec.enableServiceLinks=false"
+    - expression: "object.metadata.labels['workspaces.platform.dev/app'] != 'desktop' || (!has(object.spec.hostNetwork) || object.spec.hostNetwork == false) && (!has(object.spec.hostPID) || object.spec.hostPID == false) && (!has(object.spec.hostIPC) || object.spec.hostIPC == false)"
+      message: "desktop pods must not use hostNetwork/hostPID/hostIPC"
+    - expression: "object.metadata.labels['workspaces.platform.dev/app'] != 'desktop' || !object.spec.volumes.exists(v, has(v.hostPath))"
+      message: "desktop pods must not use hostPath volumes"
+    - expression: |
+        object.metadata.labels['workspaces.platform.dev/app'] != 'desktop' ||
+        (
+          object.spec.containers.all(c,
+            has(c.securityContext) &&
+            (!has(c.securityContext.privileged) || c.securityContext.privileged == false) &&
+            has(c.securityContext.allowPrivilegeEscalation) && c.securityContext.allowPrivilegeEscalation == false &&
+            has(c.securityContext.capabilities) &&
+            has(c.securityContext.capabilities.drop) &&
+            c.securityContext.capabilities.drop.exists(d, d == 'ALL')
+          ) &&
+          (!has(object.spec.initContainers) || object.spec.initContainers.all(c,
+            has(c.securityContext) &&
+            (!has(c.securityContext.privileged) || c.securityContext.privileged == false) &&
+            has(c.securityContext.allowPrivilegeEscalation) && c.securityContext.allowPrivilegeEscalation == false &&
+            has(c.securityContext.capabilities) &&
+            has(c.securityContext.capabilities.drop) &&
+            c.securityContext.capabilities.drop.exists(d, d == 'ALL')
+          ))
+        )
+      message: "desktop pods must be unprivileged, disallow privilege escalation, and drop all caps"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: workspaces-desktops-pod-hardening
+spec:
+  policyName: workspaces-desktops-pod-hardening
+  validationActions: [Deny]
+

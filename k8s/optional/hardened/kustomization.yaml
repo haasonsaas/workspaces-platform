@@ -10,6 +10,7 @@ resources:
 
   - agents-validatingadmissionpolicy.yaml
   - agentjob-validatingadmissionpolicy.yaml
+  - desktops-validatingadmissionpolicy.yaml
   - desktop-validatingadmissionpolicy.yaml
   - networkgrant-validatingadmissionpolicy.yaml
   - ciliumnetworkpolicy-validatingadmissionpolicy.yaml
