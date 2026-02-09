@@ -142,6 +142,12 @@ spec:
                   name: capability-broker-config
                   key: agent_default_runtime_class
                   optional: true
+            - name: AGENT_DEFAULT_SCRIPT
+              valueFrom:
+                configMapKeyRef:
+                  name: capability-broker-config
+                  key: agent_default_script
+                  optional: true
             # Optional: check-runs for agent-job triggers.
             - name: GITHUB_ENABLE_CHECK_RUNS
               valueFrom:

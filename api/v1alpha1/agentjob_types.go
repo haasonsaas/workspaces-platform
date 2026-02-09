@@ -14,6 +14,22 @@ type AgentJobSpec struct {
 	Command []string `json:"command,omitempty"`
 	Args    []string `json:"args,omitempty"`
 
+	// Script is an optional shell script to run under the workspaces agent runner
+	// (for capped + redacted logs and consistent metadata). If set, the operator
+	// will run the agent runner and ignore Command/Args for the main container.
+	//
+	// This is the recommended execution mode for agent sandboxes.
+	Script string `json:"script,omitempty"`
+
+	// Workdir is the working directory for Script execution. If empty, defaults
+	// to /workspace or /workspace/repo when GitHub checkout is enabled.
+	Workdir string `json:"workdir,omitempty"`
+
+	// GitHub optionally enables a repo checkout initContainer (read-only) before
+	// running Script. This is typically populated by the broker when creating
+	// PR-scoped AgentJobs.
+	GitHub *AgentJobGitHubSpec `json:"github,omitempty"`
+
 	Env []corev1.EnvVar `json:"env,omitempty"`
 
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
@@ -31,6 +47,17 @@ type AgentJobSpec struct {
 
 	// PolicyProfile selects a policy bundle (e.g. "restricted", "browser-automation").
 	PolicyProfile string `json:"policyProfile,omitempty"`
+}
+
+type AgentJobGitHubSpec struct {
+	// Repo is the GitHub repo in owner/repo format.
+	Repo string `json:"repo"`
+
+	// PullNumber is the PR number.
+	PullNumber int32 `json:"pullNumber"`
+
+	// HeadSHA is the expected PR head SHA (optional but recommended).
+	HeadSHA string `json:"headSha,omitempty"`
 }
 
 type AgentJobStatus struct {

@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.16.5
+    controller-gen.kubebuilder.io/version: v0.16.4
   name: desktops.workspaces.platform.dev
 spec:
   group: workspaces.platform.dev
@@ -43,6 +43,44 @@ spec:
             properties:
               home:
                 properties:
+                  reset:
+                    description: |-
+                      Reset controls home reset behavior. A reset is triggered when requestedAt
+                      changes and a valid snapshot source is configured.
+                    properties:
+                      requestedAt:
+                        description: RequestedAt triggers a reset when changed.
+                        format: date-time
+                        type: string
+                      retainOldClaims:
+                        description: |-
+                          RetainOldClaims controls how many previous home PVC revisions to keep.
+                          Defaults to 1.
+                        format: int32
+                        type: integer
+                      snapshotName:
+                        description: SnapshotName is a specific VolumeSnapshot name
+                          to reset from.
+                        type: string
+                      templateRef:
+                        description: TemplateRef names a HomeTemplate to reset from
+                          (preferred).
+                        type: string
+                    type: object
+                  seed:
+                    description: Seed controls initial creation of the home PVC when
+                      it does not exist.
+                    properties:
+                      snapshotName:
+                        description: SnapshotName is a specific VolumeSnapshot name
+                          to seed from.
+                        type: string
+                      templateRef:
+                        description: |-
+                          TemplateRef names a HomeTemplate in the same namespace whose latest
+                          ready snapshot should be used as the PVC dataSource.
+                        type: string
+                    type: object
                   size:
                     description: Size is the requested storage size (e.g. "50Gi").
                     type: string
@@ -239,6 +277,18 @@ spec:
                   - type
                   type: object
                 type: array
+              homeClaimName:
+                description: HomeClaimName is the currently mounted home PVC name.
+                type: string
+              homeRevision:
+                description: HomeRevision increments when home is reset.
+                format: int64
+                type: integer
+              lastResetAt:
+                description: LastResetAt records the last observed successful reset
+                  request timestamp.
+                format: date-time
+                type: string
               phase:
                 type: string
               serviceName:

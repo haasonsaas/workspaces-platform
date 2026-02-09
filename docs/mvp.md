@@ -5,13 +5,16 @@ This MVP is optimized for:
 - agents are first-class tenants (same image lineage, stricter policy)
 - strong agent isolation + least-privilege + auditing
 
-## 0. Cluster Prereqs (On-Prem / Proxmox)
+See also: `docs/storage.md` (Longhorn + VolumeSnapshots).
 
-1. Enable nested virtualization on Proxmox worker VMs (KVM passthrough).
+## 0. Cluster Prereqs (On-Prem / Longhorn)
+
+1. Enable nested virtualization on your worker nodes/VMs (KVM passthrough if virtualized).
 2. Install k3s + Cilium (with Hubble).
 3. Install Kata Containers (create a `RuntimeClass` named `kata`).
-4. Install Proxmox CSI backed by ZFS (PVC snapshot/clone is a prod requirement).
-5. Run MinIO (artifacts + caches + audit bundles).
+4. Install Longhorn (CSI storage).
+5. Install CSI snapshot support (`snapshot.storage.k8s.io` CRDs + snapshot-controller).
+6. Run MinIO (artifacts + caches + audit bundles).
 
 ## 1. Node Pools (Day 1)
 
@@ -66,6 +69,15 @@ The operator creates:
 
 Access is via a Tailscale SSH gateway. See `docs/access.md` for SSH/VS Code Remote wiring.
 
+### Warm Start (HomeTemplate)
+
+To seed new desktops from a warmed home snapshot (Longhorn VolumeSnapshot restore), create a `HomeTemplate`:
+```bash
+kubectl apply -f k8s/examples/hometemplate.yaml
+```
+
+Then reference it from `Desktop.spec.home.seed.templateRef`.
+
 ## 5. Create An Agent Job (Kata)
 
 Example `AgentJob`:
@@ -75,7 +87,7 @@ kubectl apply -f k8s/examples/agentjob.yaml
 
 Or with `wsctl`:
 ```bash
-wsctl agent create --name example --shell 'echo hello from agent'
+wsctl agent create --name example --script $'set -euo pipefail\necho hello from agent\nsleep 5'
 ```
 
 The operator creates a `Job` (`agentjob-<name>`) with:

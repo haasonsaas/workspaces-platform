@@ -30,6 +30,17 @@ data:
   agent_default_policy_profile: "restricted"
   agent_default_ttl_seconds_after_finished: "3600"
   agent_default_runtime_class: "kata"
+  agent_default_script: |
+    set -euo pipefail
+    cd "${WORKSPACES_REPO_DIR:-/workspace/repo}"
+    if [ -x .workspaces/agent.sh ]; then
+      exec .workspaces/agent.sh
+    fi
+    if [ -f .workspaces/agent.sh ]; then
+      bash .workspaces/agent.sh
+      exit 0
+    fi
+    echo "No .workspaces/agent.sh found; nothing to do."
 
   # Optional: check-runs for /agent run workflow (requires GitHub App permissions).
   github_enable_check_runs: "false"

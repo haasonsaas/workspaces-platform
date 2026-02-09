@@ -35,7 +35,18 @@ spec:
         - ports:
             - port: "8080"
               protocol: TCP
-    # MVP: do NOT allow direct public internet by default. Prefer internal
+    # Allow GitHub for PR-scoped AgentJobs (repo checkout + API). If you run an
+    # internal git mirror/proxy, prefer allowing only that instead.
+    - toFQDNs:
+        - matchName: github.com
+        - matchName: api.github.com
+        - matchName: objects.githubusercontent.com
+        - matchName: codeload.github.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # MVP: do NOT allow broad public internet by default. Prefer internal
     # package proxies/mirrors; everything else is unlocked per-job via
     # NetworkGrant (STRICT_FQDN + 443-only by default).
   ingress: []

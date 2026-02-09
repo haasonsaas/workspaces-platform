@@ -177,6 +177,12 @@ Persistence model:
 3. Agent runs in default-deny egress mode.
 4. If agent needs extra network access, it requests a `NetworkGrant` via broker.
 
+PR-scoped agent jobs:
+- Broker mints a short-lived, repo-scoped **read** token via GitHub App.
+- Token is stored in a per-job Secret (`agentjob-<name>-github`) and mounted only into a checkout initContainer.
+- InitContainer fetches `refs/pull/<n>/head` into `/workspace/repo`.
+- Main container runs `workspaces-agent-runner` (script mode) which caps + redacts logs and emits exec metadata.
+
 ### Network Unlock (In-Progress)
 
 1. Agent calls broker to request access to `dest.example.com:443` for job X.
@@ -220,6 +226,11 @@ Shared:
 Snapshots/clones:
 - required for fast warm provisioning (“clone warmed home/cache”)
 - required for “reset to clean” rollback
+- Longhorn is the recommended day-1 CSI backend (with `VolumeSnapshot` support)
+
+Warm starts via snapshots:
+- `HomeTemplate` CRD maintains a template PVC and a rolling set of `VolumeSnapshot`s.
+- `Desktop` can seed/reset home PVCs from these snapshots.
 
 ## Auditing (Design)
 
@@ -253,4 +264,6 @@ MVP implementation logs audit events as JSON to broker logs; the next step is sh
    - desktop idle detection, suspend/stop
    - org/user concurrency caps for agent jobs
 5. GitHub-native triggers:
-   - PR comment `/agent run`, check runs, status reporting
+   - PR comment `/agent run` (implemented)
+   - check-run creation + completion reporting (implemented; expand output + artifacts)
+   - richer status reporting (link logs/artifacts, per-profile behavior)

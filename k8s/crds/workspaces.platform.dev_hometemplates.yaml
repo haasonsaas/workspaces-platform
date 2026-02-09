@@ -4,16 +4,16 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.16.4
-  name: networkgrants.workspaces.platform.dev
+  name: hometemplates.workspaces.platform.dev
 spec:
   group: workspaces.platform.dev
   names:
-    kind: NetworkGrant
-    listKind: NetworkGrantList
-    plural: networkgrants
+    kind: HomeTemplate
+    listKind: HomeTemplateList
+    plural: hometemplates
     shortNames:
-    - ngrant
-    singular: networkgrant
+    - htpl
+    singular: hometemplate
   scope: Namespaced
   versions:
   - name: v1alpha1
@@ -38,116 +38,42 @@ spec:
           metadata:
             type: object
           spec:
+            description: |-
+              HomeTemplate defines a reusable “golden home” PVC and a rolling set of
+              VolumeSnapshots used to seed and reset Desktop home volumes.
+
+              Storage is intentionally CSI-generic; Longhorn is the recommended default.
             properties:
-              allowNon443:
-                description: AllowNon443 allows non-443 ports in egress rules. Defaults
-                  to false.
-                type: boolean
-              approved:
-                description: Approved gates whether the grant should be enforced.
-                type: boolean
-              approvedBy:
-                type: string
-              egress:
-                description: Egress destinations to allow.
+              accessModes:
+                description: AccessModes for the template PVC. Defaults to [ReadWriteOnce].
                 items:
-                  properties:
-                    host:
-                      description: |-
-                        Host is a DNS name allowed for egress (Cilium FQDN policy).
-                        MVP: exact match only (no wildcards).
-                      type: string
-                    ports:
-                      description: Ports are allowed TCP ports. If empty, defaults
-                        to [443].
-                      items:
-                        format: int32
-                        type: integer
-                      type: array
-                  required:
-                  - host
-                  type: object
-                minItems: 1
+                  type: string
                 type: array
-              podSelector:
-                description: PodSelector selects the pods this grant applies to.
-                properties:
-                  matchExpressions:
-                    description: matchExpressions is a list of label selector requirements.
-                      The requirements are ANDed.
-                    items:
-                      description: |-
-                        A label selector requirement is a selector that contains values, a key, and an operator that
-                        relates the key and values.
-                      properties:
-                        key:
-                          description: key is the label key that the selector applies
-                            to.
-                          type: string
-                        operator:
-                          description: |-
-                            operator represents a key's relationship to a set of values.
-                            Valid operators are In, NotIn, Exists and DoesNotExist.
-                          type: string
-                        values:
-                          description: |-
-                            values is an array of string values. If the operator is In or NotIn,
-                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
-                            the values array must be empty. This array is replaced during a strategic
-                            merge patch.
-                          items:
-                            type: string
-                          type: array
-                          x-kubernetes-list-type: atomic
-                      required:
-                      - key
-                      - operator
-                      type: object
-                    type: array
-                    x-kubernetes-list-type: atomic
-                  matchLabels:
-                    additionalProperties:
-                      type: string
-                    description: |-
-                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
-                      map is equivalent to an element of matchExpressions, whose key field is "key", the
-                      operator is "In", and the values array contains only "value". The requirements are ANDed.
-                    type: object
-                type: object
-                x-kubernetes-map-type: atomic
-              policyMode:
-                description: |-
-                  PolicyMode selects how egress rules are interpreted.
-                  MVP: STRICT_FQDN only.
-                enum:
-                - STRICT_FQDN
-                type: string
-              protocol:
-                description: Protocol is currently TCP only.
-                enum:
-                - TCP
-                type: string
-              purpose:
-                description: Purpose is a human-readable justification for the access
-                  request.
-                minLength: 1
-                type: string
-              reason:
-                type: string
-              ttlSeconds:
-                description: TTLSeconds is how long this grant remains active after
-                  approval.
+              intervalSeconds:
+                description: IntervalSeconds controls how often a new snapshot is
+                  created. Defaults to 86400 (daily).
                 format: int32
                 type: integer
-            required:
-            - egress
-            - podSelector
-            - purpose
+              retention:
+                description: Retention controls how many snapshots to retain. Defaults
+                  to 7.
+                format: int32
+                type: integer
+              size:
+                description: Size is the requested storage size (e.g. "50Gi").
+                type: string
+              snapshotClassName:
+                description: |-
+                  SnapshotClassName is the VolumeSnapshotClass to use. If omitted, the CSI
+                  default (if any) is used.
+                type: string
+              storageClassName:
+                description: StorageClassName for the template PVC. If omitted, the
+                  cluster default is used.
+                type: string
             type: object
           status:
             properties:
-              active:
-                type: boolean
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -204,8 +130,12 @@ spec:
                   - type
                   type: object
                 type: array
-              expiresAt:
+              lastSnapshotTime:
                 format: date-time
+                type: string
+              latestSnapshot:
+                type: string
+              templatePVC:
                 type: string
             type: object
         type: object

@@ -11,6 +11,9 @@ spec:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... you@laptop"
   home:
     size: 50Gi
+    # Optional: seed the home PVC from a HomeTemplate snapshot for warm starts.
+    # seed:
+    #   templateRef: default-home
   nodeSelector:
     workspaces.platform.dev/pool: desktops
   tolerations:
@@ -18,4 +21,3 @@ spec:
       operator: Equal
       value: desktops
       effect: NoSchedule
-

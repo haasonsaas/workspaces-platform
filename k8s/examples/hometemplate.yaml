@@ -1,0 +1,13 @@
+apiVersion: workspaces.platform.dev/v1alpha1
+kind: HomeTemplate
+metadata:
+  name: default-home
+  namespace: desktops
+spec:
+  # Longhorn is the recommended default for on-prem.
+  # If omitted, the cluster default StorageClass is used.
+  storageClassName: longhorn
+  size: 20Gi
+  intervalSeconds: 86400
+  retention: 7
+

@@ -552,7 +552,7 @@ func (g *githubService) commentNetworkGrantRequest(ctx context.Context, repo str
 	return nil
 }
 
-func (g *githubService) commentAgentJobCreated(ctx context.Context, repo string, prNumber int, jobNS, jobName, policyProfile string) error {
+func (g *githubService) commentAgentJobCreated(ctx context.Context, repo string, prNumber int, jobNS, jobName, policyProfile, checkRunURL string) error {
 	repo = strings.ToLower(strings.TrimSpace(repo))
 	if repo == "" || !strings.Contains(repo, "/") {
 		return fmt.Errorf("invalid repo %q", repo)
@@ -571,21 +571,6 @@ func (g *githubService) commentAgentJobCreated(ctx context.Context, repo string,
 	owner, name, err := splitRepo(repo)
 	if err != nil {
 		return err
-	}
-
-	var checkRunURL string
-	if g.enableCheckRuns {
-		sha, shaErr := g.getPullHeadSHA(ctx, token, owner, name, prNumber)
-		if shaErr != nil {
-			log.Printf("github get pull sha failed: %v", shaErr)
-		} else {
-			u, crErr := g.createCheckRunInProgress(ctx, token, owner, name, sha, jobNS, jobName)
-			if crErr != nil {
-				log.Printf("github create check run failed: %v", crErr)
-			} else {
-				checkRunURL = u
-			}
-		}
 	}
 
 	body := formatAgentJobCreatedComment(jobNS, jobName, policyProfile, checkRunURL)
@@ -889,6 +874,72 @@ func (g *githubService) getInstallationToken(ctx context.Context) (string, error
 	return parsed.Token, nil
 }
 
+func (g *githubService) mintRepoReadToken(ctx context.Context, repo string) (token string, expiresAt time.Time, _ error) {
+	repo = strings.ToLower(strings.TrimSpace(repo))
+	if repo == "" || !strings.Contains(repo, "/") {
+		return "", time.Time{}, fmt.Errorf("invalid repo %q", repo)
+	}
+	if _, ok := g.repoAllowlist[repo]; !ok {
+		return "", time.Time{}, fmt.Errorf("repo not allowlisted for mintRepoReadToken")
+	}
+
+	_, name, err := splitRepo(repo)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	jwtToken, err := g.appJWT()
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	u := fmt.Sprintf("%s/app/installations/%d/access_tokens", g.apiBase, g.installationID)
+	payload := map[string]any{
+		"repositories": []string{name},
+		"permissions": map[string]any{
+			"contents": "read",
+		},
+	}
+	b, _ := json.Marshal(payload)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(b))
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", "Bearer "+jwtToken)
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := g.httpClient.Do(req)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", time.Time{}, fmt.Errorf("github token endpoint (scoped): status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var parsed struct {
+		Token     string `json:"token"`
+		ExpiresAt string `json:"expires_at"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "", time.Time{}, err
+	}
+	if parsed.Token == "" || parsed.ExpiresAt == "" {
+		return "", time.Time{}, errors.New("github token endpoint returned empty token/expiry")
+	}
+
+	exp, err := time.Parse(time.RFC3339, parsed.ExpiresAt)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return parsed.Token, exp, nil
+}
+
 func (g *githubService) appJWT() (string, error) {
 	now := time.Now()
 	claims := jwt.RegisteredClaims{
@@ -1018,7 +1069,7 @@ func (g *githubService) getPullHeadSHA(ctx context.Context, token, owner, repo s
 	return strings.TrimSpace(parsed.Head.SHA), nil
 }
 
-func (g *githubService) createCheckRunInProgress(ctx context.Context, token, owner, repo, headSHA, jobNS, jobName string) (string, error) {
+func (g *githubService) createCheckRunInProgress(ctx context.Context, token, owner, repo, headSHA, jobNS, jobName string) (int64, string, error) {
 	u := fmt.Sprintf("%s/repos/%s/%s/check-runs", g.apiBase, owner, repo)
 
 	payload := map[string]any{
@@ -1035,6 +1086,70 @@ func (g *githubService) createCheckRunInProgress(ctx context.Context, token, own
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(b))
 	if err != nil {
+		return 0, "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := g.httpClient.Do(req)
+	if err != nil {
+		return 0, "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return 0, "", fmt.Errorf("github create check run: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+
+	var parsed struct {
+		ID      int64  `json:"id"`
+		HTMLURL string `json:"html_url"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return 0, "", err
+	}
+	return parsed.ID, strings.TrimSpace(parsed.HTMLURL), nil
+}
+
+func (g *githubService) completeCheckRun(ctx context.Context, repo string, checkRunID int64, conclusion, summary string) (string, error) {
+	repo = strings.ToLower(strings.TrimSpace(repo))
+	if repo == "" || !strings.Contains(repo, "/") {
+		return "", fmt.Errorf("invalid repo %q", repo)
+	}
+	if _, ok := g.repoAllowlist[repo]; !ok {
+		return "", fmt.Errorf("repo not allowlisted for check runs")
+	}
+	if checkRunID <= 0 {
+		return "", fmt.Errorf("invalid checkRunID %d", checkRunID)
+	}
+
+	token, err := g.getInstallationToken(ctx)
+	if err != nil {
+		return "", err
+	}
+	owner, name, err := splitRepo(repo)
+	if err != nil {
+		return "", err
+	}
+
+	u := fmt.Sprintf("%s/repos/%s/%s/check-runs/%d", g.apiBase, owner, name, checkRunID)
+	now := time.Now().UTC().Format(time.RFC3339)
+	payload := map[string]any{
+		"status":       "completed",
+		"completed_at": now,
+		"conclusion":   conclusion,
+		"output": map[string]any{
+			"title":   "Agent job " + conclusion,
+			"summary": strings.TrimSpace(summary),
+		},
+	}
+	b, _ := json.Marshal(payload)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, u, bytes.NewReader(b))
+	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
@@ -1050,7 +1165,7 @@ func (g *githubService) createCheckRunInProgress(ctx context.Context, token, own
 
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("github create check run: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+		return "", fmt.Errorf("github update check run: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 
 	var parsed struct {

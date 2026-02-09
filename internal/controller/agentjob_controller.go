@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -61,7 +62,10 @@ func (r *AgentJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		job.Spec.BackoffLimit = ptrTo(int32(0))
 		job.Spec.TTLSecondsAfterFinished = &ttl
 		job.Spec.Template.ObjectMeta.Labels = labels
-		job.Spec.Template.Spec = corev1.PodSpec{
+
+		workspaceEnv := append([]corev1.EnvVar{{Name: "WORKSPACE", Value: "/workspace"}}, aj.Spec.Env...)
+
+		pod := corev1.PodSpec{
 			RestartPolicy:                corev1.RestartPolicyNever,
 			RuntimeClassName:             &desiredRuntimeClass,
 			AutomountServiceAccountToken: ptrTo(false),
@@ -73,27 +77,126 @@ func (r *AgentJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 					VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 				},
 			},
-			Containers: []corev1.Container{
+		}
+
+		sec := &corev1.SecurityContext{
+			AllowPrivilegeEscalation: ptrTo(false),
+			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+			RunAsNonRoot:             ptrTo(true),
+			RunAsUser:                ptrTo(int64(1000)),
+			SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+		}
+
+		if strings.TrimSpace(aj.Spec.Script) != "" {
+			// Script mode: run via the workspaces agent runner to ensure output is
+			// capped + redacted in logs and exec metadata is emitted.
+			workdir := strings.TrimSpace(aj.Spec.Workdir)
+			repoDir := "/workspace/repo"
+			if workdir == "" {
+				if aj.Spec.GitHub != nil {
+					workdir = repoDir
+				} else {
+					workdir = "/workspace"
+				}
+			}
+
+			// Optional: checkout a PR head before running.
+			if aj.Spec.GitHub != nil {
+				secretName := fmt.Sprintf("agentjob-%s-github", aj.Name)
+				checkout := corev1.Container{
+					Name:    "checkout",
+					Image:   aj.Spec.Image,
+					Command: []string{"/bin/bash", "-lc"},
+					Args: []string{`set -euo pipefail
+: "${WORKSPACES_GITHUB_REPO:?missing}"
+: "${WORKSPACES_GITHUB_PR_NUMBER:?missing}"
+dest="${WORKSPACE}/repo"
+rm -rf "$dest"
+mkdir -p "$dest"
+cat > /tmp/askpass.sh <<'EOF'
+#!/bin/sh
+echo "$WORKSPACES_GITHUB_TOKEN"
+EOF
+chmod 0700 /tmp/askpass.sh
+export GIT_ASKPASS=/tmp/askpass.sh
+export GIT_TERMINAL_PROMPT=0
+git -C "$dest" init
+git -C "$dest" remote add origin "https://x-access-token@github.com/${WORKSPACES_GITHUB_REPO}.git"
+git -C "$dest" fetch --depth 1 origin "refs/pull/${WORKSPACES_GITHUB_PR_NUMBER}/head:pr"
+git -C "$dest" checkout --force pr
+if [ -n "${WORKSPACES_GITHUB_HEAD_SHA:-}" ]; then
+  got="$(git -C "$dest" rev-parse HEAD)"
+  if [ "$got" != "$WORKSPACES_GITHUB_HEAD_SHA" ]; then
+    echo "head sha mismatch: $got" >&2
+    exit 1
+  fi
+fi
+`},
+					Env: append(workspaceEnv, []corev1.EnvVar{
+						{Name: "WORKSPACES_GITHUB_REPO", Value: strings.TrimSpace(aj.Spec.GitHub.Repo)},
+						{Name: "WORKSPACES_GITHUB_PR_NUMBER", Value: fmt.Sprintf("%d", aj.Spec.GitHub.PullNumber)},
+						{Name: "WORKSPACES_GITHUB_HEAD_SHA", Value: strings.TrimSpace(aj.Spec.GitHub.HeadSHA)},
+						{
+							Name: "WORKSPACES_GITHUB_TOKEN",
+							ValueFrom: &corev1.EnvVarSource{
+								SecretKeyRef: &corev1.SecretKeySelector{
+									LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
+									Key:                  "token",
+								},
+							},
+						},
+					}...),
+					VolumeMounts:   []corev1.VolumeMount{{Name: "workspace", MountPath: "/workspace"}},
+					SecurityContext: sec,
+				}
+				pod.InitContainers = append(pod.InitContainers, checkout)
+			}
+
+			mainEnv := append(workspaceEnv,
+				corev1.EnvVar{Name: "WORKSPACES_TASK_SCRIPT", Value: strings.TrimSpace(aj.Spec.Script)},
+				corev1.EnvVar{Name: "WORKSPACES_WORKDIR", Value: workdir},
+				corev1.EnvVar{Name: "WORKSPACES_REPO_DIR", Value: repoDir},
+			)
+			if aj.Spec.GitHub != nil {
+				mainEnv = append(mainEnv,
+					corev1.EnvVar{Name: "WORKSPACES_GITHUB_REPO", Value: strings.TrimSpace(aj.Spec.GitHub.Repo)},
+					corev1.EnvVar{Name: "WORKSPACES_GITHUB_PR_NUMBER", Value: fmt.Sprintf("%d", aj.Spec.GitHub.PullNumber)},
+					corev1.EnvVar{Name: "WORKSPACES_GITHUB_HEAD_SHA", Value: strings.TrimSpace(aj.Spec.GitHub.HeadSHA)},
+				)
+			}
+
+			main := corev1.Container{
+				Name:      "agent",
+				Image:     aj.Spec.Image,
+				Command:   []string{"/usr/local/bin/workspaces-agent-runner"},
+				Env:       mainEnv,
+				Resources: aj.Spec.Resources,
+				VolumeMounts: []corev1.VolumeMount{
+					{Name: "workspace", MountPath: "/workspace"},
+				},
+				WorkingDir:      workdir,
+				SecurityContext: sec,
+			}
+			pod.Containers = []corev1.Container{main}
+		} else {
+			// Direct mode: run the container command as-is.
+			pod.Containers = []corev1.Container{
 				{
 					Name:      "agent",
 					Image:     aj.Spec.Image,
 					Command:   aj.Spec.Command,
 					Args:      aj.Spec.Args,
-					Env:       append([]corev1.EnvVar{{Name: "WORKSPACE", Value: "/workspace"}}, aj.Spec.Env...),
+					Env:       workspaceEnv,
 					Resources: aj.Spec.Resources,
 					VolumeMounts: []corev1.VolumeMount{
 						{Name: "workspace", MountPath: "/workspace"},
 					},
-					SecurityContext: &corev1.SecurityContext{
-						AllowPrivilegeEscalation: ptrTo(false),
-						Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
-						RunAsNonRoot:             ptrTo(true),
-						RunAsUser:                ptrTo(int64(1000)),
-						SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
-					},
+					SecurityContext: sec,
 				},
-			},
+			}
 		}
+
+		job.Spec.Template.Spec = pod
 
 		return controllerutil.SetControllerReference(&aj, job, r.Scheme)
 	})

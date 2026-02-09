@@ -24,10 +24,20 @@ wsctl desktop list
 
 ## AgentJob
 
-Create a simple agent job (Kata by default in the operator; this just creates the CR):
+Create a simple agent job (Kata by default in the operator; this just creates the CR).
+
+Recommended (script mode, runs via `workspaces-agent-runner`):
 ```bash
 wsctl agent create \
   --name example \
+  --image ghcr.io/workspaces-platform/agent-runner:latest \
+  --script $'set -euo pipefail\necho hello from agent\nsleep 5'
+```
+
+Direct mode (runs container `command/args` as-is):
+```bash
+wsctl agent create \
+  --name example-direct \
   --image ghcr.io/workspaces-platform/agent-runner:latest \
   --shell 'echo hello from agent'
 ```
@@ -70,4 +80,3 @@ wsctl github open-pr \
   --title 'Fix thing' \
   --patch-file /tmp/patch.diff
 ```
-

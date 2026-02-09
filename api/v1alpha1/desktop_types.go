@@ -40,6 +40,37 @@ type DesktopHomeSpec struct {
 
 	// Size is the requested storage size (e.g. "50Gi").
 	Size string `json:"size,omitempty"`
+
+	// Seed controls initial creation of the home PVC when it does not exist.
+	Seed *DesktopHomeSeedSpec `json:"seed,omitempty"`
+
+	// Reset controls home reset behavior. A reset is triggered when requestedAt
+	// changes and a valid snapshot source is configured.
+	Reset *DesktopHomeResetSpec `json:"reset,omitempty"`
+}
+
+type DesktopHomeSeedSpec struct {
+	// TemplateRef names a HomeTemplate in the same namespace whose latest
+	// ready snapshot should be used as the PVC dataSource.
+	TemplateRef *string `json:"templateRef,omitempty"`
+
+	// SnapshotName is a specific VolumeSnapshot name to seed from.
+	SnapshotName *string `json:"snapshotName,omitempty"`
+}
+
+type DesktopHomeResetSpec struct {
+	// RequestedAt triggers a reset when changed.
+	RequestedAt *metav1.Time `json:"requestedAt,omitempty"`
+
+	// TemplateRef names a HomeTemplate to reset from (preferred).
+	TemplateRef *string `json:"templateRef,omitempty"`
+
+	// SnapshotName is a specific VolumeSnapshot name to reset from.
+	SnapshotName *string `json:"snapshotName,omitempty"`
+
+	// RetainOldClaims controls how many previous home PVC revisions to keep.
+	// Defaults to 1.
+	RetainOldClaims int32 `json:"retainOldClaims,omitempty"`
 }
 
 // DesktopStatus defines the observed state of Desktop.
@@ -48,6 +79,15 @@ type DesktopStatus struct {
 
 	// ServiceName is the in-cluster Service exposing SSH.
 	ServiceName string `json:"serviceName,omitempty"`
+
+	// HomeClaimName is the currently mounted home PVC name.
+	HomeClaimName string `json:"homeClaimName,omitempty"`
+
+	// HomeRevision increments when home is reset.
+	HomeRevision int64 `json:"homeRevision,omitempty"`
+
+	// LastResetAt records the last observed successful reset request timestamp.
+	LastResetAt *metav1.Time `json:"lastResetAt,omitempty"`
 
 	// Conditions follows Kubernetes conventions.
 	Conditions []metav1.Condition `json:"conditions,omitempty"`

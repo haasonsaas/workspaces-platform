@@ -3,6 +3,7 @@ kind: Kustomization
 resources:
   - crds/workspaces.platform.dev_desktops.yaml
   - crds/workspaces.platform.dev_agentjobs.yaml
+  - crds/workspaces.platform.dev_hometemplates.yaml
   - crds/workspaces.platform.dev_networkgrants.yaml
   - namespaces/desktops.yaml
   - namespaces/agents.yaml

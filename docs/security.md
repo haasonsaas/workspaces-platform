@@ -83,6 +83,11 @@ Target behavior:
 - redact known token/key patterns in captured stdout/stderr
 - avoid storing unredacted logs; if you add break-glass, make it explicit, rare, and heavily gated
 
+Repo checkout tokens:
+- PR-scoped AgentJobs need repo contents; broker mints a short-lived, repo-scoped **read** token via GitHub App.
+- Token is stored in a per-job Secret (`agentjob-<name>-github`) and mounted only into the checkout initContainer.
+- Main agent container never receives the token by default.
+
 ## Supply Chain Controls (Planned)
 
 Recommended next steps:

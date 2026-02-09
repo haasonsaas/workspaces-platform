@@ -9,3 +9,4 @@ build:
 	go build ./cmd/ws-proxy
 	go build ./cmd/github-webhook
 	go build ./cmd/wsctl
+	go build ./cmd/agent-runner

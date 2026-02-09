@@ -5,12 +5,11 @@ metadata:
   namespace: agents
 spec:
   image: ghcr.io/workspaces-platform/agent-runner:latest
-  command: ["/bin/sh", "-lc"]
-  args:
-    - |
-      set -euo pipefail
-      echo "hello from agent"
-      sleep 5
+  # Recommended: script mode (workspaces agent runner) for capped + redacted logs.
+  script: |
+    set -euo pipefail
+    echo "hello from agent"
+    sleep 5
   policyProfile: restricted
   ttlSecondsAfterFinished: 3600
   runtimeClassName: kata

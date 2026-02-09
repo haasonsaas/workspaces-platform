@@ -22,11 +22,14 @@ rules:
     resources: ["customresourcedefinitions"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["workspaces.platform.dev"]
-    resources: ["desktops", "agentjobs", "networkgrants"]
+    resources: ["desktops", "agentjobs", "networkgrants", "hometemplates"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["workspaces.platform.dev"]
-    resources: ["desktops/status", "agentjobs/status", "networkgrants/status"]
+    resources: ["desktops/status", "agentjobs/status", "networkgrants/status", "hometemplates/status"]
     verbs: ["get", "update", "patch"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["cilium.io"]
     resources: ["ciliumnetworkpolicies"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -43,4 +46,3 @@ subjects:
   - kind: ServiceAccount
     name: workspaces-operator
     namespace: workspaces-system
-

@@ -33,6 +33,8 @@ Flow:
 2. `github-webhook` listens for `issue_comment` events and calls broker:
    - `POST /v1/agent-jobs`
 3. Broker creates an `AgentJob` in the `agents` namespace and posts a status comment (and optionally a check-run).
+   - If check-runs are enabled, broker creates a GitHub Check Run in-progress and a reporter loop marks it completed when the AgentJob finishes.
+   - Broker also mints a short-lived, repo-scoped **read** token and stores it in a per-job Secret (`agentjob-<name>-github`) used only by a checkout initContainer.
 
 Command syntax (PR comment):
 - `/agent run`

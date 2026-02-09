@@ -20,6 +20,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	workspacesv1alpha1 "workspaces-platform/api/v1alpha1"
 	auditpkg "workspaces-platform/internal/audit"
@@ -27,6 +28,7 @@ import (
 
 type server struct {
 	k8s client.Client
+	scheme *runtime.Scheme
 
 	audit auditpkg.Emitter
 
@@ -66,7 +68,7 @@ func main() {
 		log.Printf("github integration disabled: %v", ghErr)
 	}
 
-	s := &server{k8s: k8sClient, adminToken: adminToken, gh: ghSvc, audit: auditEmitter}
+	s := &server{k8s: k8sClient, scheme: scheme, adminToken: adminToken, gh: ghSvc, audit: auditEmitter}
 	s.agentToken = agentToken
 	s.webhookToken = webhookToken
 
@@ -88,6 +90,8 @@ func main() {
 
 		r.Post("/agent-jobs", s.handleCreateAgentJob)
 	})
+
+	s.startCheckRunReporter()
 
 	log.Printf("capability-broker listening on %s", listenAddr)
 	log.Fatal(http.ListenAndServe(listenAddr, r))
@@ -135,6 +139,10 @@ func (s *server) handleCreateNetworkGrant(w http.ResponseWriter, r *http.Request
 	}
 	if req.Namespace == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "namespace_required"})
+		return
+	}
+	if strings.TrimSpace(req.Namespace) != "agents" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "namespace_not_allowed"})
 		return
 	}
 	if len(req.PodSelector) == 0 {
@@ -249,6 +257,10 @@ func (s *server) handleApproveNetworkGrant(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "namespace_and_name_required"})
 		return
 	}
+	if strings.TrimSpace(ns) != "agents" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "namespace_not_allowed"})
+		return
+	}
 
 	var body approveNetworkGrantRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -313,6 +325,10 @@ func (s *server) handleApproveNetworkGrantGitHub(w http.ResponseWriter, r *http.
 	name := chi.URLParam(r, "name")
 	if ns == "" || name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "namespace_and_name_required"})
+		return
+	}
+	if strings.TrimSpace(ns) != "agents" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "namespace_not_allowed"})
 		return
 	}
 
@@ -387,6 +403,10 @@ func (s *server) handleCreateAgentJob(w http.ResponseWriter, r *http.Request) {
 	if ns == "" {
 		ns = "agents"
 	}
+	if ns != "agents" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "namespace_not_allowed"})
+		return
+	}
 
 	if req.GitHub == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "github_context_required"})
@@ -403,11 +423,13 @@ func (s *server) handleCreateAgentJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Enforce repo allowlist using the same GitHub allowlist as broker-only writes.
-	if s.gh != nil {
-		if !s.gh.repoIsAllowed(repo) {
-			writeJSON(w, http.StatusForbidden, map[string]any{"error": "repo_not_allowed"})
-			return
-		}
+	if s.gh == nil {
+		writeJSON(w, http.StatusNotImplemented, map[string]any{"error": "github_disabled"})
+		return
+	}
+	if !s.gh.repoIsAllowed(repo) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "repo_not_allowed"})
+		return
 	}
 
 	defaultImage := strings.TrimSpace(getenv("AGENT_DEFAULT_IMAGE", "ghcr.io/workspaces-platform/agent-runner:latest"))
@@ -447,47 +469,132 @@ func (s *server) handleCreateAgentJob(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	script := `set -euo pipefail
-echo "agent job started"
-echo "repo=$WORKSPACES_GITHUB_REPO"
-echo "pr=$WORKSPACES_GITHUB_PR_NUMBER"
+	script := strings.TrimSpace(os.Getenv("AGENT_DEFAULT_SCRIPT"))
+	if script == "" {
+		script = `set -euo pipefail
+cd "${WORKSPACES_REPO_DIR:-/workspace/repo}"
+if [ -x .workspaces/agent.sh ]; then
+  exec .workspaces/agent.sh
+fi
+if [ -f .workspaces/agent.sh ]; then
+  bash .workspaces/agent.sh
+  exit 0
+fi
+echo "No .workspaces/agent.sh found; nothing to do."
 `
+	}
+
+	jobName := strings.ToLower(strings.TrimSpace(req.Name))
+	if jobName == "" {
+		jobName = fmt.Sprintf("ghpr-%d-%s", req.GitHub.PullNumber, randomSlug())
+		if len(jobName) > 63 {
+			jobName = jobName[:63]
+		}
+		jobName = strings.TrimRight(jobName, "-")
+	}
+
+	owner, repoName, err := splitRepo(repo)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "github_repo_required"})
+		return
+	}
+
+	installToken, err := s.gh.getInstallationToken(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "github_token_failed"})
+		return
+	}
+
+	headSHA, err := s.gh.getPullHeadSHA(ctx, installToken, owner, repoName, req.GitHub.PullNumber)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "github_pull_fetch_failed"})
+		return
+	}
+
+	var checkRunID int64
+	var checkRunURL string
+	if s.gh.enableCheckRuns {
+		id, url, crErr := s.gh.createCheckRunInProgress(ctx, installToken, owner, repoName, headSHA, ns, jobName)
+		if crErr != nil {
+			log.Printf("github create check run failed: %v", crErr)
+		} else {
+			checkRunID = id
+			checkRunURL = url
+		}
+	}
+
+	repoReadToken, repoReadExpiry, err := s.gh.mintRepoReadToken(ctx, repo)
+	if err != nil {
+		// If we can't mint a scoped read token, don't start the job.
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "github_repo_read_token_failed"})
+		return
+	}
+
+	annotations := map[string]string{
+		"workspaces.platform.dev/source":             "github",
+		"workspaces.platform.dev/github-repo":        repo,
+		"workspaces.platform.dev/github-pr-number":   fmt.Sprintf("%d", req.GitHub.PullNumber),
+		"workspaces.platform.dev/github-comment-url": strings.TrimSpace(req.GitHub.CommentURL),
+		"workspaces.platform.dev/github-actor":       strings.TrimSpace(req.GitHub.Actor),
+		"workspaces.platform.dev/github-head-sha":    headSHA,
+	}
+	if checkRunID > 0 {
+		annotations["workspaces.platform.dev/github-check-run-id"] = fmt.Sprintf("%d", checkRunID)
+	}
+	if strings.TrimSpace(checkRunURL) != "" {
+		annotations["workspaces.platform.dev/github-check-run-url"] = strings.TrimSpace(checkRunURL)
+	}
+
+	ttlPtr := func() *int32 { v := ttl; return &v }()
+	runtimePtr := func() *string { v := runtimeClass; return &v }()
 
 	aj := &workspacesv1alpha1.AgentJob{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: ns,
-			Annotations: map[string]string{
-				"workspaces.platform.dev/source":             "github",
-				"workspaces.platform.dev/github-repo":        repo,
-				"workspaces.platform.dev/github-pr-number":   fmt.Sprintf("%d", req.GitHub.PullNumber),
-				"workspaces.platform.dev/github-comment-url": strings.TrimSpace(req.GitHub.CommentURL),
-				"workspaces.platform.dev/github-actor":       strings.TrimSpace(req.GitHub.Actor),
-			},
+			Name:        jobName,
+			Namespace:   ns,
+			Annotations: annotations,
 		},
 		Spec: workspacesv1alpha1.AgentJobSpec{
 			Image:                   defaultImage,
-			Command:                 []string{"/bin/sh", "-lc"},
-			Args:                    []string{script},
-			Env:                     []corev1.EnvVar{{Name: "WORKSPACES_GITHUB_REPO", Value: repo}, {Name: "WORKSPACES_GITHUB_PR_NUMBER", Value: fmt.Sprintf("%d", req.GitHub.PullNumber)}},
+			Script:                  script,
+			GitHub:                  &workspacesv1alpha1.AgentJobGitHubSpec{Repo: repo, PullNumber: int32(req.GitHub.PullNumber), HeadSHA: headSHA},
 			NodeSelector:            nodeSelector,
 			Tolerations:             tolerations,
-			RuntimeClassName:        func() *string { v := runtimeClass; return &v }(),
-			TTLSecondsAfterFinished: func() *int32 { v := ttl; return &v }(),
+			RuntimeClassName:        runtimePtr,
+			TTLSecondsAfterFinished: ttlPtr,
 			PolicyProfile:           policyProfile,
 		},
 	}
 
-	if req.Name != "" {
-		aj.Name = strings.TrimSpace(req.Name)
-	} else {
-		aj.GenerateName = fmt.Sprintf("ghpr-%d-", req.GitHub.PullNumber)
-		if len(aj.GenerateName) > 40 {
-			aj.GenerateName = aj.GenerateName[:40]
-		}
-	}
-
 	if err := s.k8s.Create(ctx, aj); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "create_failed"})
+		return
+	}
+
+	// Create a short-lived repo read token secret for the Job checkout initContainer.
+	secretName := fmt.Sprintf("agentjob-%s-github", aj.Name)
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: ns}}
+	_, sErr := controllerutil.CreateOrUpdate(ctx, s.k8s, secret, func() error {
+		if secret.Labels == nil {
+			secret.Labels = map[string]string{}
+		}
+		secret.Labels["workspaces.platform.dev/app"] = "agent"
+		secret.Labels["workspaces.platform.dev/agentjob"] = aj.Name
+		if secret.Annotations == nil {
+			secret.Annotations = map[string]string{}
+		}
+		secret.Annotations["workspaces.platform.dev/expires-at"] = repoReadExpiry.UTC().Format(time.RFC3339)
+		secret.Type = corev1.SecretTypeOpaque
+		if secret.Data == nil {
+			secret.Data = map[string][]byte{}
+		}
+		secret.Data["token"] = []byte(repoReadToken)
+		return controllerutil.SetControllerReference(aj, secret, s.scheme)
+	})
+	if sErr != nil {
+		// Cleanup best-effort so we don't strand jobs without checkout creds.
+		_ = s.k8s.Delete(ctx, aj)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "github_token_secret_failed"})
 		return
 	}
 
@@ -500,16 +607,16 @@ echo "pr=$WORKSPACES_GITHUB_PR_NUMBER"
 			"name":                       aj.Name,
 			"repo":                       repo,
 			"pull_number":                req.GitHub.PullNumber,
+			"head_sha":                   headSHA,
+			"check_run_id":               checkRunID,
 			"policyProfile":              policyProfile,
 			"ttl_seconds_after_finished": ttl,
 		})
 	}
 
 	// Best-effort: post status comment back to the PR.
-	if s.gh != nil {
-		if err := s.gh.commentAgentJobCreated(ctx, repo, req.GitHub.PullNumber, aj.Namespace, aj.Name, policyProfile); err != nil {
-			log.Printf("github comment for agent job failed: %v", err)
-		}
+	if err := s.gh.commentAgentJobCreated(ctx, repo, req.GitHub.PullNumber, aj.Namespace, aj.Name, policyProfile, checkRunURL); err != nil {
+		log.Printf("github comment for agent job failed: %v", err)
 	}
 
 	writeJSON(w, http.StatusCreated, aj)

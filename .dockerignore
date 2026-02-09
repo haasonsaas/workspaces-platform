@@ -1,0 +1,15 @@
+.git
+**/.git
+
+*.log
+**/*.log
+
+.DS_Store
+**/.DS_Store
+
+tmp
+**/tmp
+
+dist
+**/dist
+

@@ -203,7 +203,9 @@ func cmdAgent(args []string) {
 			name      = fs.String("name", "", "AgentJob name")
 			namespace = fs.String("namespace", "agents", "Namespace")
 			image     = fs.String("image", "ghcr.io/workspaces-platform/agent-runner:latest", "Agent image")
-			shell     = fs.String("shell", "echo hello from agent", "Shell script to run (sh -lc)")
+			script    = fs.String("script", "", "Script to run (agent runner mode; recommended)")
+			workdir   = fs.String("workdir", "", "Working directory for --script (optional)")
+			shell     = fs.String("shell", "echo hello from agent", "Shell script to run (direct mode; bash -lc)")
 			profile   = fs.String("policy-profile", "restricted", "Policy profile")
 			ttl       = fs.Int("ttl", 3600, "TTL seconds after finished")
 		)
@@ -216,6 +218,7 @@ func cmdAgent(args []string) {
 		dieIf(err)
 		runtimeClass := "kata"
 		ttl32 := int32(*ttl)
+		scriptText := strings.TrimSpace(*script)
 		aj := &workspacesv1alpha1.AgentJob{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      strings.TrimSpace(*name),
@@ -223,8 +226,8 @@ func cmdAgent(args []string) {
 			},
 			Spec: workspacesv1alpha1.AgentJobSpec{
 				Image:                   strings.TrimSpace(*image),
-				Command:                 []string{"/bin/sh", "-lc"},
-				Args:                    []string{strings.TrimSpace(*shell)},
+				Script:                  scriptText,
+				Workdir:                 strings.TrimSpace(*workdir),
 				PolicyProfile:           strings.TrimSpace(*profile),
 				RuntimeClassName:        &runtimeClass,
 				TTLSecondsAfterFinished: &ttl32,
@@ -236,6 +239,10 @@ func cmdAgent(args []string) {
 					Effect:   corev1.TaintEffectNoSchedule,
 				}},
 			},
+		}
+		if scriptText == "" {
+			aj.Spec.Command = []string{"/bin/bash", "-lc"}
+			aj.Spec.Args = []string{strings.TrimSpace(*shell)}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
