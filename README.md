@@ -24,6 +24,7 @@ Docs:
 - `docs/audit.md`
 - `docs/ci.md`
 - `docs/cost.md`
+- `docs/threat-model.md`
 - `docs/github.md`
 - `docs/storage.md`
 - `docs/config.md`
