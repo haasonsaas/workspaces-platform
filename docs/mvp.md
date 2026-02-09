@@ -90,6 +90,18 @@ MVP approval flow:
 - approver flips it to `approved=true` (+ `ttlSeconds`, `approvedBy`, `reason`)
 - operator enforces it until expiry
 
+Optional (GitHub workflow):
+- agent includes GitHub context (`repo`, `pullNumber`) when requesting a `NetworkGrant`
+- broker posts an approval request comment on the PR
+- `cmd/github-webhook` approves grants from allowlisted approvers via `/netgrant approve ...` comments
+
+See: `docs/github.md`.
+
+To deploy the optional webhook bridge (after creating `github-webhook-secrets`):
+```bash
+kubectl apply -k k8s/github-webhook
+```
+
 ## 7. GitHub Writes (Broker Only)
 
 MVP policy: agents never get GitHub write tokens.

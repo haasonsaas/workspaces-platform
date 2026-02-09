@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: github-webhook
+  namespace: workspaces-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: github-webhook
+  template:
+    metadata:
+      labels:
+        app: github-webhook
+    spec:
+      containers:
+        - name: github-webhook
+          # TODO: publish/build this image.
+          image: ghcr.io/workspaces-platform/github-webhook:latest
+          env:
+            - name: LISTEN_ADDR
+              value: ":8080"
+            - name: GITHUB_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: github-webhook-secrets
+                  key: webhook_secret
+            - name: GITHUB_REPO_ALLOWLIST
+              valueFrom:
+                configMapKeyRef:
+                  name: github-webhook-config
+                  key: github_repo_allowlist
+            - name: GITHUB_APPROVER_ALLOWLIST
+              valueFrom:
+                configMapKeyRef:
+                  name: github-webhook-config
+                  key: github_approver_allowlist
+            - name: BROKER_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: github-webhook-config
+                  key: broker_base_url
+            - name: BROKER_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: github-webhook-secrets
+                  key: broker_admin_token
+          ports:
+            - name: http
+              containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+

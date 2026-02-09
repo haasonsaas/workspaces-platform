@@ -31,6 +31,7 @@ The platform must enforce:
 - `cmd/workspaces-operator/`: controller-manager binary.
 - `cmd/capability-broker/`: capability broker HTTP API (network unlocks; GitHub PR creation is implemented here).
 - `cmd/ws-proxy/`: gateway helper for SSH `ProxyCommand` (default: K8s port-forward; see `docs/access.md`).
+- `cmd/github-webhook/`: optional GitHub webhook bridge (PR comment approvals for `NetworkGrant`).
 - `k8s/`: kustomize base (CRDs, namespaces, operator, broker, baseline policies).
 - `images/`: Dockerfiles for reference images.
 - `docs/`: system docs.

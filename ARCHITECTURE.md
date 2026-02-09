@@ -55,6 +55,9 @@ This document describes the target architecture for ephemeral employee dev deskt
         ▼
  CiliumNetworkPolicy (FQDN egress, TTL)
 
+ Optional GitHub approval loop:
+   GitHub PR comment → github-webhook → broker approve → NetworkGrant
+
 
  Audit events (agents heavy; humans metadata-only)
    → append-only store (MinIO + signing; later WORM/ObjectLock)
@@ -188,6 +191,10 @@ MVP schema constraints (enforced by controller):
 - `protocol`: `TCP` only
 - ports: `443` only by default (set `allowNon443: true` to permit others)
 - `purpose` is required (human justification)
+
+Optional GitHub approval loop:
+- broker can post a PR comment requesting approval (if the agent request includes GitHub context)
+- a small webhook bridge (`cmd/github-webhook`) can translate `/netgrant approve ...` PR comments into broker approval calls
 
 ### GitHub PR (Broker-Only Writes)
 

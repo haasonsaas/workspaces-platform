@@ -30,10 +30,21 @@ Properties:
 
 ## Current State In This Repo
 
-The broker logs audit events as JSON records (prefixed with `AUDIT`) to its normal logs:
-- see `cmd/capability-broker/github.go`
+By default, the broker logs audit events as JSON records (prefixed with `AUDIT`) to its normal logs (useful for dev, not tamper-evident).
 
-This is sufficient to validate workflows but not tamper-evident by itself.
+Optional (recommended): enable a tamper-evident local file sink that writes JSONL with a hash chain.
+
+Config (broker):
+- `AUDIT_SINK=stdout|file` (default: `stdout`)
+- `AUDIT_STREAM` (default: component name)
+- `AUDIT_DIR` (required if `AUDIT_SINK=file`)
+- `AUDIT_CHECKPOINT_EVERY_N` (default: `500`)
+- `AUDIT_CHECKPOINT_EVERY_SECONDS` (default: `60`)
+- `AUDIT_FSYNC_ON_CHECKPOINT=true|false` (default: `false`)
+
+Implementation: `internal/audit/` and wired into `cmd/capability-broker/`.
+
+The file sink provides hash chaining (tamper-evident) but still needs append-only/WORM storage in production to prevent history rewrites.
 
 ## Next Implementation Step
 
@@ -45,4 +56,3 @@ This is sufficient to validate workflows but not tamper-evident by itself.
    - `audit/YYYY-MM-DD/stream=<name>/bundle=<uuid>.jsonl`
    - `audit/YYYY-MM-DD/stream=<name>/checkpoint=<ts>.json`
 3. Lock buckets in production (MinIO Object Lock).
-

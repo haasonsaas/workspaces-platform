@@ -24,6 +24,9 @@ import (
 
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/golang-jwt/jwt/v5"
+
+	workspacesv1alpha1 "workspaces-platform/api/v1alpha1"
+	auditpkg "workspaces-platform/internal/audit"
 )
 
 type githubService struct {
@@ -52,6 +55,8 @@ type githubService struct {
 	sensitivePathPrefixDenylist []string
 	sensitivePathAllowlistRepos map[string]struct{}
 
+	audit auditpkg.Emitter
+
 	httpClient *http.Client
 
 	mu           sync.Mutex
@@ -59,7 +64,7 @@ type githubService struct {
 	cachedExpiry time.Time
 }
 
-func newGitHubServiceFromEnv() (*githubService, error) {
+func newGitHubServiceFromEnv(audit auditpkg.Emitter) (*githubService, error) {
 	appID, ok, err := envInt64("GITHUB_APP_ID")
 	if err != nil {
 		return nil, err
@@ -134,6 +139,7 @@ func newGitHubServiceFromEnv() (*githubService, error) {
 		allowBinaryPatches:          allowBinary,
 		sensitivePathPrefixDenylist: sensitiveDeny,
 		sensitivePathAllowlistRepos: sensitiveAllowRepos,
+		audit:                       audit,
 		httpClient:                  &http.Client{Timeout: 30 * time.Second},
 		cachedToken:                 "",
 		cachedExpiry:                time.Time{},
@@ -459,20 +465,22 @@ func (g *githubService) openPRFromPatch(ctx context.Context, r *http.Request, re
 
 	reqID := middleware.GetReqID(ctx)
 	touchedFiles, truncated := truncateStrings(changedFiles, 50)
-	auditEvent("github.open_pr", map[string]any{
-		"request_id":              reqID,
-		"remote_addr":             r.RemoteAddr,
-		"repo":                    repo,
-		"base":                    base,
-		"branch":                  branch,
-		"pr_number":               prNum,
-		"pr_url":                  prURL,
-		"patch_sha256":            patchHashHex,
-		"commit_message":          commitMsg,
-		"touched_files_count":     len(changedFiles),
-		"touched_files_truncated": truncated,
-		"touched_files":           touchedFiles,
-	})
+	if g.audit != nil {
+		g.audit.Emit("github.open_pr", map[string]any{
+			"request_id":              reqID,
+			"remote_addr":             r.RemoteAddr,
+			"repo":                    repo,
+			"base":                    base,
+			"branch":                  branch,
+			"pr_number":               prNum,
+			"pr_url":                  prURL,
+			"patch_sha256":            patchHashHex,
+			"commit_message":          commitMsg,
+			"touched_files_count":     len(changedFiles),
+			"touched_files_truncated": truncated,
+			"touched_files":           touchedFiles,
+		})
+	}
 
 	return &githubOpenPRResponse{
 		Repo:        repo,
@@ -482,6 +490,82 @@ func (g *githubService) openPRFromPatch(ctx context.Context, r *http.Request, re
 		URL:         prURL,
 		PatchSHA256: patchHashHex,
 	}, nil
+}
+
+func (g *githubService) commentNetworkGrantRequest(ctx context.Context, repo string, prNumber int, ng *workspacesv1alpha1.NetworkGrant) error {
+	repo = strings.ToLower(strings.TrimSpace(repo))
+	if repo == "" || !strings.Contains(repo, "/") {
+		return fmt.Errorf("invalid repo %q", repo)
+	}
+	if _, ok := g.repoAllowlist[repo]; !ok {
+		return fmt.Errorf("repo not allowlisted for github comments")
+	}
+	if prNumber <= 0 {
+		return fmt.Errorf("invalid prNumber %d", prNumber)
+	}
+
+	token, err := g.getInstallationToken(ctx)
+	if err != nil {
+		return err
+	}
+	owner, name, err := splitRepo(repo)
+	if err != nil {
+		return err
+	}
+
+	body := formatNetworkGrantApprovalComment(ng)
+	commentURL, err := g.createIssueComment(ctx, token, owner, name, prNumber, body)
+	if err != nil {
+		return err
+	}
+
+	if g.audit != nil {
+		g.audit.Emit("github.comment_networkgrant_request", map[string]any{
+			"repo":        repo,
+			"pr_number":   prNumber,
+			"comment_url": commentURL,
+			"grant_ns":    ng.Namespace,
+			"grant_name":  ng.Name,
+		})
+	}
+
+	return nil
+}
+
+func formatNetworkGrantApprovalComment(ng *workspacesv1alpha1.NetworkGrant) string {
+	// Keep this intentionally plain and unambiguous. This is an approval surface.
+	var b strings.Builder
+	b.WriteString("Network access request for an agent job.\n\n")
+	b.WriteString("Grant:\n")
+	b.WriteString("- Namespace: `" + ng.Namespace + "`\n")
+	b.WriteString("- Name: `" + ng.Name + "`\n")
+	if strings.TrimSpace(ng.Spec.Purpose) != "" {
+		b.WriteString("- Purpose: " + strings.TrimSpace(ng.Spec.Purpose) + "\n")
+	}
+	b.WriteString("\nDestinations:\n")
+	for _, r := range ng.Spec.Egress {
+		host := strings.TrimSpace(r.Host)
+		if host == "" {
+			continue
+		}
+		ports := r.Ports
+		if len(ports) == 0 {
+			ports = []int32{443}
+		}
+		b.WriteString("- `" + host + "` ports: `")
+		for i, p := range ports {
+			if i > 0 {
+				b.WriteString(",")
+			}
+			b.WriteString(fmt.Sprintf("%d", p))
+		}
+		b.WriteString("`\n")
+	}
+	b.WriteString("\nApprove with:\n")
+	b.WriteString("`/netgrant approve " + ng.Namespace + "/" + ng.Name + "`\n")
+	b.WriteString("\nOptional TTL override:\n")
+	b.WriteString("`/netgrant approve " + ng.Namespace + "/" + ng.Name + " ttl=1800`\n")
+	return b.String()
 }
 
 func (g *githubService) changedFiles(ctx context.Context, repoDir string, env []string) ([]string, error) {
@@ -771,18 +855,39 @@ func (g *githubService) createPR(ctx context.Context, token, owner, repo, title,
 	return parsed.Number, parsed.HTMLURL, nil
 }
 
-func auditEvent(eventType string, fields map[string]any) {
-	evt := map[string]any{
-		"type": eventType,
-		"ts":   time.Now().UTC().Format(time.RFC3339Nano),
-	}
-	for k, v := range fields {
-		evt[k] = v
-	}
-	b, err := json.Marshal(evt)
+func (g *githubService) createIssueComment(ctx context.Context, token, owner, repo string, issueNumber int, body string) (string, error) {
+	u := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments", g.apiBase, owner, repo, issueNumber)
+	payload := map[string]any{"body": body}
+	b, _ := json.Marshal(payload)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(b))
 	if err != nil {
-		log.Printf("AUDIT marshal failed: %v", err)
-		return
+		return "", err
 	}
-	log.Printf("AUDIT %s", b)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := g.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("github create comment: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+
+	var parsed struct {
+		HTMLURL string `json:"html_url"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return "", err
+	}
+	if parsed.HTMLURL == "" {
+		return "", errors.New("github create comment returned empty url")
+	}
+	return parsed.HTMLURL, nil
 }
