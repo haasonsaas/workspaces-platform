@@ -23,6 +23,7 @@ Docs:
 - `docs/github.md`
 - `docs/storage.md`
 - `docs/config.md`
+- `docs/reproducibility.md`
 - `docs/wsctl.md`
 
 This repo is an MVP that compiles and deploys manifests, but you still need to wire:

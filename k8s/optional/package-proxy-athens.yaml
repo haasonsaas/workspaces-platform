@@ -1,0 +1,67 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: athens-storage
+  namespace: workspaces-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: longhorn
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: athens
+  namespace: workspaces-system
+  labels:
+    workspaces.platform.dev/app: proxy
+    workspaces.platform.dev/component: package-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: athens
+  template:
+    metadata:
+      labels:
+        app: athens
+        workspaces.platform.dev/app: proxy
+        workspaces.platform.dev/component: package-proxy
+    spec:
+      containers:
+        - name: athens
+          image: gomods/athens:v0.14.0
+          env:
+            - name: ATHENS_STORAGE_TYPE
+              value: disk
+            - name: ATHENS_DISK_STORAGE_ROOT
+              value: /var/lib/athens
+          ports:
+            - name: http
+              containerPort: 3000
+          volumeMounts:
+            - name: storage
+              mountPath: /var/lib/athens
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: athens-storage
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: athens
+  namespace: workspaces-system
+spec:
+  selector:
+    app: athens
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+

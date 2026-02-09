@@ -1,0 +1,96 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: verdaccio-storage
+  namespace: workspaces-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: longhorn
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: verdaccio-config
+  namespace: workspaces-system
+data:
+  config.yaml: |
+    storage: /verdaccio/storage
+    auth:
+      htpasswd:
+        file: /verdaccio/storage/htpasswd
+    uplinks:
+      npmjs:
+        url: https://registry.npmjs.org/
+    packages:
+      "@*/*":
+        access: $all
+        publish: $authenticated
+        proxy: npmjs
+      "**":
+        access: $all
+        publish: $authenticated
+        proxy: npmjs
+    logs:
+      - {type: stdout, format: pretty, level: http}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: verdaccio
+  namespace: workspaces-system
+  labels:
+    workspaces.platform.dev/app: proxy
+    workspaces.platform.dev/component: package-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: verdaccio
+  template:
+    metadata:
+      labels:
+        app: verdaccio
+        workspaces.platform.dev/app: proxy
+        workspaces.platform.dev/component: package-proxy
+    spec:
+      containers:
+        - name: verdaccio
+          image: verdaccio/verdaccio:5
+          ports:
+            - name: http
+              containerPort: 4873
+          volumeMounts:
+            - name: storage
+              mountPath: /verdaccio/storage
+            - name: config
+              mountPath: /verdaccio/conf/config.yaml
+              subPath: config.yaml
+              readOnly: true
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: verdaccio-storage
+        - name: config
+          configMap:
+            name: verdaccio-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: verdaccio
+  namespace: workspaces-system
+spec:
+  selector:
+    app: verdaccio
+  ports:
+    - name: http
+      port: 4873
+      targetPort: 4873
+
