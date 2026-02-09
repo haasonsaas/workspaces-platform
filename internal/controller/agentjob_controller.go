@@ -69,11 +69,16 @@ func (r *AgentJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			RestartPolicy:                corev1.RestartPolicyNever,
 			RuntimeClassName:             &desiredRuntimeClass,
 			AutomountServiceAccountToken: ptrTo(false),
+			EnableServiceLinks:           ptrTo(false),
 			NodeSelector:                 aj.Spec.NodeSelector,
 			Tolerations:                  aj.Spec.Tolerations,
 			Volumes: []corev1.Volume{
 				{
 					Name:         "workspace",
+					VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+				},
+				{
+					Name:         "tmp",
 					VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 				},
 			},
@@ -82,6 +87,7 @@ func (r *AgentJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		sec := &corev1.SecurityContext{
 			AllowPrivilegeEscalation: ptrTo(false),
 			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+			ReadOnlyRootFilesystem:   ptrTo(true),
 			RunAsNonRoot:             ptrTo(true),
 			RunAsUser:                ptrTo(int64(1000)),
 			SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
@@ -163,7 +169,10 @@ fi
 							},
 						},
 					}...),
-					VolumeMounts:    []corev1.VolumeMount{{Name: "workspace", MountPath: "/workspace"}},
+					VolumeMounts: []corev1.VolumeMount{
+						{Name: "workspace", MountPath: "/workspace"},
+						{Name: "tmp", MountPath: "/tmp"},
+					},
 					SecurityContext: sec,
 				}
 				pod.InitContainers = append(pod.InitContainers, checkout)
@@ -191,6 +200,7 @@ fi
 				Resources: aj.Spec.Resources,
 				VolumeMounts: []corev1.VolumeMount{
 					{Name: "workspace", MountPath: "/workspace"},
+					{Name: "tmp", MountPath: "/tmp"},
 				},
 				WorkingDir:      workdir,
 				SecurityContext: sec,
@@ -208,6 +218,7 @@ fi
 					Resources: aj.Spec.Resources,
 					VolumeMounts: []corev1.VolumeMount{
 						{Name: "workspace", MountPath: "/workspace"},
+						{Name: "tmp", MountPath: "/tmp"},
 					},
 					SecurityContext: sec,
 				},
