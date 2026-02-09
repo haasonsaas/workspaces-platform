@@ -86,6 +86,8 @@ Agents often print secrets accidentally (dependency scripts, debug output).
 Target behavior:
 - prevent secrets from being present in the environment whenever possible
 - redact known token/key patterns in captured stdout/stderr
+- redact literal secret values from env vars that look sensitive (names matching `*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*KEY*`, etc)
+- redact entire PEM blocks (not just headers)
 - avoid storing unredacted logs; if you add break-glass, make it explicit, rare, and heavily gated
 
 Repo checkout tokens:

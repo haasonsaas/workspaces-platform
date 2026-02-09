@@ -47,6 +47,7 @@ func main() {
 	defer func() { _ = auditEmitter.Close() }()
 
 	red := redact.NewDefault()
+	_ = red.AddPotentialSecretsFromEnviron(os.Environ())
 
 	repo := strings.TrimSpace(os.Getenv("WORKSPACES_GITHUB_REPO"))
 	pr := strings.TrimSpace(os.Getenv("WORKSPACES_GITHUB_PR_NUMBER"))

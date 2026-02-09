@@ -45,7 +45,7 @@ Config (broker):
 
 Implementation: `internal/audit/` and wired into `cmd/capability-broker/`.
 
-Agent jobs (script mode) run via `cmd/agent-runner`, which also emits `AUDIT` records to stdout by default. This keeps exec metadata close to the sandbox boundary even before a full log shipping pipeline exists.
+Agent jobs (script mode) run via `cmd/agent-runner`, which also emits `AUDIT` records to stdout by default. It caps stdout/stderr by default and applies best-effort secret redaction (token patterns, PEM blocks, and env-derived literal secrets) before writing logs. This keeps exec metadata close to the sandbox boundary even before a full log shipping pipeline exists.
 
 The file sink provides hash chaining (tamper-evident) but still needs append-only/WORM storage in production to prevent history rewrites.
 
