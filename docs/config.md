@@ -11,6 +11,7 @@ Flags:
 - `--default-agent-runtimeclass` (env: `DEFAULT_AGENT_RUNTIMECLASS`): RuntimeClass used when `AgentJob.spec.runtimeClassName` is empty.
 - `--networkgrant-max-ttl-seconds` (env: `NETWORKGRANT_MAX_TTL_SECONDS`): max `NetworkGrant.spec.ttlSeconds` allowed (0 disables cap). Default `7200`.
 - `--networkgrant-max-egress-rules` (env: `NETWORKGRANT_MAX_EGRESS_RULES`): max `NetworkGrant.spec.egress` rules allowed (0 disables cap). Default `20`.
+- `--networkgrant-max-dns-names` (env: `NETWORKGRANT_MAX_DNS_NAMES`): max unique DNS names allowed for DNS L7 allow rules (union of `spec.egress.host` and `spec.dnsAllow`). Default `50`.
 
 ## capability-broker
 

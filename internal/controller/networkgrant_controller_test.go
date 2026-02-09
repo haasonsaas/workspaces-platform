@@ -47,19 +47,22 @@ func TestValidateAndResolveNetworkGrantMatchLabels_CapsAndValidation(t *testing.
 
 	t.Run("ok", func(t *testing.T) {
 		g := base()
-		ml, err := validateAndResolveNetworkGrantMatchLabels(&g, 7200, 20)
+		ml, dns, err := validateAndResolveNetworkGrantMatchLabels(&g, 7200, 20, 50)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if ml[labelApp] != "agent" || ml[labelAgentJob] != "job" {
 			t.Fatalf("unexpected match labels: %#v", ml)
 		}
+		if len(dns) == 0 {
+			t.Fatalf("expected dns names to be derived from egress hosts")
+		}
 	})
 
 	t.Run("ttl_exceeds_cap", func(t *testing.T) {
 		g := base()
 		g.Spec.TTLSeconds = 9001
-		if _, err := validateAndResolveNetworkGrantMatchLabels(&g, 7200, 20); err == nil {
+		if _, _, err := validateAndResolveNetworkGrantMatchLabels(&g, 7200, 20, 50); err == nil {
 			t.Fatalf("expected error")
 		}
 	})
@@ -67,7 +70,7 @@ func TestValidateAndResolveNetworkGrantMatchLabels_CapsAndValidation(t *testing.
 	t.Run("egress_too_many", func(t *testing.T) {
 		g := base()
 		g.Spec.Egress = append(g.Spec.Egress, workspacesv1alpha1.NetworkGrantEgressRule{Host: "api.example.com", Ports: []int32{443}})
-		if _, err := validateAndResolveNetworkGrantMatchLabels(&g, 7200, 1); err == nil {
+		if _, _, err := validateAndResolveNetworkGrantMatchLabels(&g, 7200, 1, 50); err == nil {
 			t.Fatalf("expected error")
 		}
 	})
@@ -75,7 +78,7 @@ func TestValidateAndResolveNetworkGrantMatchLabels_CapsAndValidation(t *testing.
 	t.Run("non443_requires_allowNon443", func(t *testing.T) {
 		g := base()
 		g.Spec.Egress = []workspacesv1alpha1.NetworkGrantEgressRule{{Host: "example.com", Ports: []int32{80}}}
-		if _, err := validateAndResolveNetworkGrantMatchLabels(&g, 7200, 20); err == nil {
+		if _, _, err := validateAndResolveNetworkGrantMatchLabels(&g, 7200, 20, 50); err == nil {
 			t.Fatalf("expected error")
 		}
 	})
@@ -83,7 +86,7 @@ func TestValidateAndResolveNetworkGrantMatchLabels_CapsAndValidation(t *testing.
 	t.Run("wildcard_denied", func(t *testing.T) {
 		g := base()
 		g.Spec.Egress = []workspacesv1alpha1.NetworkGrantEgressRule{{Host: "*.example.com", Ports: []int32{443}}}
-		if _, err := validateAndResolveNetworkGrantMatchLabels(&g, 7200, 20); err == nil {
+		if _, _, err := validateAndResolveNetworkGrantMatchLabels(&g, 7200, 20, 50); err == nil {
 			t.Fatalf("expected error")
 		}
 	})

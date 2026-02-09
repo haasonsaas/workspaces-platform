@@ -23,7 +23,7 @@ For agents (and ideally desktops over time):
 Agents are **default-deny egress**.
 
 Allowed by default:
-- DNS
+- DNS (restricted to in-cluster names to prevent DNS exfil)
 - capability broker
 - required package registries/proxies (prefer internal mirrors; agents should use proxies by default)
 
@@ -45,6 +45,8 @@ MVP constraints (enforced by controller; no admission webhook required):
 - `purpose` required on every `NetworkGrant`
 - `ttlSeconds` is capped by the operator (default `7200`; `NETWORKGRANT_MAX_TTL_SECONDS` / `--networkgrant-max-ttl-seconds`)
 - `egress` destinations are capped by the operator (default `20`; `NETWORKGRANT_MAX_EGRESS_RULES` / `--networkgrant-max-egress-rules`)
+- approved grants add per-host DNS L7 allow rules (and optional `spec.dnsAllow` for extra DNS names like CNAME targets)
+- DNS allow rules are capped (default `50`; `NETWORKGRANT_MAX_DNS_NAMES` / `--networkgrant-max-dns-names`)
 
 Hard defaults:
 - agents are default-deny egress
@@ -109,3 +111,4 @@ These manifests are optional so clusters without this feature can still run the 
 
 - `k8s/optional/agents-validatingadmissionpolicy.yaml`: denies non-conforming **agent Pods** (host mounts, privileged flags, missing `runtimeClassName=kata`, etc).
 - `k8s/optional/agentjob-validatingadmissionpolicy.yaml`: enforces **AgentJob CR** guardrails (pinned image digests, runtime class constraints).
+- `k8s/optional/desktop-validatingadmissionpolicy.yaml`: enforces **Desktop CR** guardrails (pinned image digests when explicitly set).

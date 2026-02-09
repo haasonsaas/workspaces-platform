@@ -73,6 +73,9 @@ wsctl netgrant request \
   --purpose 'fetch GitHub metadata' \
   --egress github.com:443 \
   --egress api.github.com:443
+
+# Optional: allow DNS resolution for additional names (e.g. CNAME targets) without granting direct egress.
+# wsctl netgrant request ... --dns-allow github.map.fastly.net
 ```
 
 Approve a grant (requires admin token):

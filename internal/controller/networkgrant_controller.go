@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -28,6 +29,10 @@ type NetworkGrantReconciler struct {
 
 	// MaxEgressRules caps the number of destinations per grant. 0 disables the cap.
 	MaxEgressRules int
+
+	// MaxDNSNames caps the number of unique DNS names allowed for DNS L7 allow rules
+	// (union of spec.egress hosts and spec.dnsAllow). 0 disables the cap.
+	MaxDNSNames int
 }
 
 const networkGrantCondSpecValid = "SpecValid"
@@ -51,7 +56,7 @@ func (r *NetworkGrantReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Validate spec. Without an admission webhook, the controller must ensure
 	// invalid requests never produce enforceable network policy.
-	matchLabels, err := validateAndResolveNetworkGrantMatchLabels(&grant, r.MaxTTLSeconds, r.MaxEgressRules)
+	matchLabels, dnsNames, err := validateAndResolveNetworkGrantMatchLabels(&grant, r.MaxTTLSeconds, r.MaxEgressRules, r.MaxDNSNames)
 	if err != nil {
 		_ = r.Delete(ctx, cnp)
 		if grant.Status.Active {
@@ -123,7 +128,7 @@ func (r *NetworkGrantReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		"endpointSelector": map[string]any{
 			"matchLabels": matchLabels,
 		},
-		"egress": buildCiliumEgress(grant.Spec.Egress),
+		"egress": buildCiliumNetworkGrantEgress(grant.Spec.Egress, dnsNames),
 	}
 
 	op, err := controllerutil.CreateOrUpdate(ctx, r.Client, cnp, func() error {
@@ -168,12 +173,12 @@ func resolveNetworkGrantTTLSeconds(requested, max int32) (int32, error) {
 	return ttl, nil
 }
 
-func validateAndResolveNetworkGrantMatchLabels(grant *workspacesv1alpha1.NetworkGrant, maxTTLSeconds int32, maxEgressRules int) (map[string]string, error) {
+func validateAndResolveNetworkGrantMatchLabels(grant *workspacesv1alpha1.NetworkGrant, maxTTLSeconds int32, maxEgressRules int, maxDNSNames int) (map[string]string, []string, error) {
 	// Selector must be explicit and stable.
 	var matchLabels map[string]string
 	if grant.Spec.AgentJobRef != nil && strings.TrimSpace(grant.Spec.AgentJobRef.Name) != "" {
 		if grant.Spec.PodSelector != nil {
-			return nil, fmt.Errorf("podSelector is not allowed when agentJobRef is set")
+			return nil, nil, fmt.Errorf("podSelector is not allowed when agentJobRef is set")
 		}
 		matchLabels = map[string]string{
 			labelApp:      "agent",
@@ -181,24 +186,24 @@ func validateAndResolveNetworkGrantMatchLabels(grant *workspacesv1alpha1.Network
 		}
 	} else {
 		if grant.Spec.PodSelector == nil {
-			return nil, fmt.Errorf("agentJobRef or podSelector is required")
+			return nil, nil, fmt.Errorf("agentJobRef or podSelector is required")
 		}
 		if len(grant.Spec.PodSelector.MatchExpressions) != 0 {
-			return nil, fmt.Errorf("podSelector.matchExpressions not supported; use matchLabels only")
+			return nil, nil, fmt.Errorf("podSelector.matchExpressions not supported; use matchLabels only")
 		}
 		if len(grant.Spec.PodSelector.MatchLabels) == 0 {
-			return nil, fmt.Errorf("podSelector.matchLabels is required")
+			return nil, nil, fmt.Errorf("podSelector.matchLabels is required")
 		}
 		matchLabels = grant.Spec.PodSelector.MatchLabels
 	}
 
 	purpose := strings.TrimSpace(grant.Spec.Purpose)
 	if purpose == "" {
-		return nil, fmt.Errorf("purpose is required")
+		return nil, nil, fmt.Errorf("purpose is required")
 	}
 
 	if grant.Spec.Approved && strings.TrimSpace(grant.Spec.ApprovedBy) == "" {
-		return nil, fmt.Errorf("approvedBy is required when approved is true")
+		return nil, nil, fmt.Errorf("approvedBy is required when approved is true")
 	}
 
 	mode := grant.Spec.PolicyMode
@@ -206,7 +211,7 @@ func validateAndResolveNetworkGrantMatchLabels(grant *workspacesv1alpha1.Network
 		mode = workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN
 	}
 	if mode != workspacesv1alpha1.NetworkGrantPolicyModeStrictFQDN {
-		return nil, fmt.Errorf("policyMode %q is not supported (MVP supports STRICT_FQDN only)", mode)
+		return nil, nil, fmt.Errorf("policyMode %q is not supported (MVP supports STRICT_FQDN only)", mode)
 	}
 
 	proto := grant.Spec.Protocol
@@ -214,40 +219,29 @@ func validateAndResolveNetworkGrantMatchLabels(grant *workspacesv1alpha1.Network
 		proto = workspacesv1alpha1.NetworkGrantProtocolTCP
 	}
 	if proto != workspacesv1alpha1.NetworkGrantProtocolTCP {
-		return nil, fmt.Errorf("protocol %q is not supported (MVP supports TCP only)", proto)
+		return nil, nil, fmt.Errorf("protocol %q is not supported (MVP supports TCP only)", proto)
 	}
 
 	if len(grant.Spec.Egress) == 0 {
-		return nil, fmt.Errorf("egress must contain at least one destination")
+		return nil, nil, fmt.Errorf("egress must contain at least one destination")
 	}
 	if maxEgressRules > 0 && len(grant.Spec.Egress) > maxEgressRules {
-		return nil, fmt.Errorf("egress contains too many destinations (%d > %d)", len(grant.Spec.Egress), maxEgressRules)
+		return nil, nil, fmt.Errorf("egress contains too many destinations (%d > %d)", len(grant.Spec.Egress), maxEgressRules)
 	}
 
 	if _, err := resolveNetworkGrantTTLSeconds(grant.Spec.TTLSeconds, maxTTLSeconds); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+
+	dnsSet := map[string]struct{}{}
 
 	for i, r := range grant.Spec.Egress {
 		host := strings.TrimSpace(r.Host)
-		if host == "" {
-			return nil, fmt.Errorf("egress[%d].host is required", i)
+		if err := validateNetworkGrantHost(host); err != nil {
+			return nil, nil, fmt.Errorf("egress[%d].host %q is invalid: %w", i, host, err)
 		}
-		if strings.ContainsAny(host, " \t\r\n") {
-			return nil, fmt.Errorf("egress[%d].host must not contain whitespace", i)
-		}
-		if strings.Contains(host, "*") {
-			return nil, fmt.Errorf("egress[%d].host must be an exact FQDN (no wildcards)", i)
-		}
-		if strings.ContainsAny(host, "/:") {
-			return nil, fmt.Errorf("egress[%d].host must be a hostname only (no scheme/path/port)", i)
-		}
-		if strings.HasPrefix(host, ".") || strings.HasSuffix(host, ".") {
-			return nil, fmt.Errorf("egress[%d].host must not start or end with '.'", i)
-		}
-		if len(host) > 253 {
-			return nil, fmt.Errorf("egress[%d].host is too long", i)
-		}
+
+		dnsSet[strings.ToLower(host)] = struct{}{}
 
 		ports := r.Ports
 		if len(ports) == 0 {
@@ -255,15 +249,108 @@ func validateAndResolveNetworkGrantMatchLabels(grant *workspacesv1alpha1.Network
 		}
 		for _, p := range ports {
 			if p <= 0 || p > 65535 {
-				return nil, fmt.Errorf("egress[%d] has invalid port %d", i, p)
+				return nil, nil, fmt.Errorf("egress[%d] has invalid port %d", i, p)
 			}
 			if !grant.Spec.AllowNon443 && p != 443 {
-				return nil, fmt.Errorf("egress[%d] requests non-443 port %d but allowNon443 is false", i, p)
+				return nil, nil, fmt.Errorf("egress[%d] requests non-443 port %d but allowNon443 is false", i, p)
 			}
 		}
 	}
 
-	return matchLabels, nil
+	for i, host := range grant.Spec.DNSAllow {
+		h := strings.TrimSpace(host)
+		if h == "" {
+			return nil, nil, fmt.Errorf("dnsAllow[%d] is empty", i)
+		}
+		if err := validateNetworkGrantHost(h); err != nil {
+			return nil, nil, fmt.Errorf("dnsAllow[%d] %q is invalid: %w", i, h, err)
+		}
+		dnsSet[strings.ToLower(h)] = struct{}{}
+	}
+
+	dnsNames := make([]string, 0, len(dnsSet))
+	for h := range dnsSet {
+		dnsNames = append(dnsNames, h)
+	}
+	sort.Strings(dnsNames)
+
+	if maxDNSNames > 0 && len(dnsNames) > maxDNSNames {
+		return nil, nil, fmt.Errorf("too many DNS names for allow rules (%d > %d)", len(dnsNames), maxDNSNames)
+	}
+
+	return matchLabels, dnsNames, nil
+}
+
+func validateNetworkGrantHost(host string) error {
+	if strings.TrimSpace(host) == "" {
+		return fmt.Errorf("empty")
+	}
+	if strings.ContainsAny(host, " \t\r\n") {
+		return fmt.Errorf("contains whitespace")
+	}
+	if strings.Contains(host, "*") {
+		return fmt.Errorf("must be an exact FQDN (no wildcards)")
+	}
+	if strings.ContainsAny(host, "/:") {
+		return fmt.Errorf("must be a hostname only (no scheme/path/port)")
+	}
+	if strings.HasPrefix(host, ".") || strings.HasSuffix(host, ".") {
+		return fmt.Errorf("must not start or end with '.'")
+	}
+	if len(host) > 253 {
+		return fmt.Errorf("too long")
+	}
+	return nil
+}
+
+func buildCiliumNetworkGrantEgress(rules []workspacesv1alpha1.NetworkGrantEgressRule, dnsNames []string) []any {
+	out := buildCiliumEgress(rules)
+	if dnsRule := buildCiliumDNSAllowEgress(dnsNames); dnsRule != nil {
+		out = append([]any{dnsRule}, out...)
+	}
+	return out
+}
+
+func buildCiliumDNSAllowEgress(dnsNames []string) any {
+	if len(dnsNames) == 0 {
+		return nil
+	}
+
+	dnsRules := make([]any, 0, len(dnsNames))
+	for _, h := range dnsNames {
+		h = strings.TrimSpace(h)
+		if h == "" {
+			continue
+		}
+		dnsRules = append(dnsRules, map[string]any{"matchName": h})
+	}
+	if len(dnsRules) == 0 {
+		return nil
+	}
+
+	// Allow DNS queries for the requested names via kube-dns/CoreDNS. This is
+	// additive with baseline policy (which should default-deny external DNS).
+	return map[string]any{
+		"toEndpoints": []any{
+			map[string]any{
+				"matchLabels": map[string]string{
+					"k8s:io.kubernetes.pod.namespace": "kube-system",
+					"k8s-app":                         "kube-dns",
+				},
+			},
+		},
+		"toPorts": []any{
+			map[string]any{
+				"ports": []any{
+					map[string]any{"port": "53", "protocol": "UDP"},
+					map[string]any{"port": "53", "protocol": "TCP"},
+				},
+				"rules": map[string]any{
+					"dns": dnsRules,
+				},
+			},
+		},
+	}
 }
 
 func buildCiliumEgress(rules []workspacesv1alpha1.NetworkGrantEgressRule) []any {

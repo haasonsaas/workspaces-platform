@@ -33,6 +33,7 @@ func main() {
 	var defaultAgentRuntimeClass string
 	var maxGrantTTLSeconds int
 	var maxGrantEgressRules int
+	var maxGrantDNSNames int
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -42,6 +43,7 @@ func main() {
 	flag.StringVar(&defaultAgentRuntimeClass, "default-agent-runtimeclass", getenv("DEFAULT_AGENT_RUNTIMECLASS", "kata"), "Default RuntimeClassName for AgentJobs.")
 	flag.IntVar(&maxGrantTTLSeconds, "networkgrant-max-ttl-seconds", intFromEnv("NETWORKGRANT_MAX_TTL_SECONDS", 7200), "Max ttlSeconds allowed for NetworkGrants (0 disables cap).")
 	flag.IntVar(&maxGrantEgressRules, "networkgrant-max-egress-rules", intFromEnv("NETWORKGRANT_MAX_EGRESS_RULES", 20), "Max number of egress destinations allowed for NetworkGrants (0 disables cap).")
+	flag.IntVar(&maxGrantDNSNames, "networkgrant-max-dns-names", intFromEnv("NETWORKGRANT_MAX_DNS_NAMES", 50), "Max number of unique DNS names allowed for NetworkGrant DNS allow rules (0 disables cap).")
 
 	opts := zap.Options{
 		Development: true,
@@ -53,6 +55,9 @@ func main() {
 
 	if maxGrantEgressRules < 0 {
 		maxGrantEgressRules = 0
+	}
+	if maxGrantDNSNames < 0 {
+		maxGrantDNSNames = 0
 	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
@@ -92,6 +97,7 @@ func main() {
 		Scheme:         mgr.GetScheme(),
 		MaxTTLSeconds:  clampNonNegativeInt32(maxGrantTTLSeconds),
 		MaxEgressRules: maxGrantEgressRules,
+		MaxDNSNames:    maxGrantDNSNames,
 	}).SetupWithManager(mgr); err != nil {
 		ctrl.Log.Error(err, "unable to create controller", "controller", "NetworkGrant")
 		os.Exit(1)

@@ -97,6 +97,10 @@ Policy shape:
 - `agents`: default-deny egress; allow only DNS + broker + required registries/proxies. Everything else is unlocked per-job via `NetworkGrant`.
 - `desktops`: can be less strict initially, but should still prefer “known-good” outbound (package proxies, artifact store).
 
+DNS hardening:
+- baseline agent policy allows DNS only for in-cluster names (e.g. `*.svc.cluster.local`) to prevent DNS exfil when agents are otherwise “corp network off”
+- approved `NetworkGrant`s add per-host DNS L7 allow rules for their destinations (and optional extra DNS names for CNAME chains)
+
 ## Core Control Plane Components
 
 ### 1) Workspaces Operator
@@ -202,6 +206,8 @@ MVP schema constraints (enforced by controller):
 - `purpose` is required (human justification)
 - `ttlSeconds` is capped by the operator (default `7200`; `NETWORKGRANT_MAX_TTL_SECONDS` / `--networkgrant-max-ttl-seconds`)
 - `egress` destinations are capped by the operator (default `20`; `NETWORKGRANT_MAX_EGRESS_RULES` / `--networkgrant-max-egress-rules`)
+- `dnsAllow` may be used to allow DNS resolution for additional names without granting direct egress (e.g. CNAME chains)
+- DNS allow rules (union of `spec.egress.host` and `spec.dnsAllow`) are capped (default `50`; `NETWORKGRANT_MAX_DNS_NAMES` / `--networkgrant-max-dns-names`)
 
 Optional GitHub approval loop:
 - broker can post a PR comment requesting approval (if the agent request includes GitHub context)

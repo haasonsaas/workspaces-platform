@@ -110,6 +110,8 @@ MVP schema constraints (enforced by controller):
 - `purpose` is required on every `NetworkGrant`
 - `ttlSeconds` is capped by the operator (default `7200`; `NETWORKGRANT_MAX_TTL_SECONDS` / `--networkgrant-max-ttl-seconds`)
 - `egress` destinations are capped by the operator (default `20`; `NETWORKGRANT_MAX_EGRESS_RULES` / `--networkgrant-max-egress-rules`)
+- approved grants add per-host DNS L7 allow rules (and optional `spec.dnsAllow` for extra DNS names like CNAME targets)
+- DNS allow rules are capped (default `50`; `NETWORKGRANT_MAX_DNS_NAMES` / `--networkgrant-max-dns-names`)
 
 If a grant is rejected (condition `SpecValid=false`) due to caps, fix it by lowering `spec.ttlSeconds`, splitting `spec.egress` across multiple grants, or raising the operator caps.
 

@@ -389,11 +389,13 @@ func cmdNetgrant(args []string) {
 			ttl         = fs.Int("ttl", 1800, "TTL seconds")
 			allowNon443 = fs.Bool("allow-non-443", false, "Allow non-443 ports")
 			egress      multiFlag
+			dnsAllow    multiFlag
 			broker      = fs.String("broker", getenv("WORKSPACES_BROKER_URL", ""), "Broker base URL")
 			ghRepo      = fs.String("github-repo", "", "Optional GitHub repo owner/repo for PR workflow")
 			ghPR        = fs.Int("github-pr", 0, "Optional PR number for PR workflow")
 		)
 		fs.Var(&egress, "egress", "Egress rule host[:port] (repeatable)")
+		fs.Var(&dnsAllow, "dns-allow", "Additional DNS name to allow (repeatable)")
 		fs.Parse(args[1:])
 
 		if strings.TrimSpace(*broker) == "" {
@@ -424,6 +426,17 @@ func cmdNetgrant(args []string) {
 			"egress":      rules,
 			"ttlSeconds":  *ttl,
 			"allowNon443": *allowNon443,
+		}
+		if len(dnsAllow) != 0 {
+			out := []string{}
+			for _, h := range dnsAllow {
+				if s := strings.TrimSpace(h); s != "" {
+					out = append(out, s)
+				}
+			}
+			if len(out) != 0 {
+				payload["dnsAllow"] = out
+			}
 		}
 		if strings.TrimSpace(*ghRepo) != "" && *ghPR > 0 {
 			payload["github"] = map[string]any{"repo": strings.TrimSpace(*ghRepo), "pullNumber": *ghPR}

@@ -64,6 +64,16 @@ spec:
                 type: boolean
               approvedBy:
                 type: string
+              dnsAllow:
+                description: |-
+                  DNSAllow adds additional DNS names the pod may resolve (DNS queries),
+                  without granting direct egress to those names. This is useful to allow
+                  CNAME chains while keeping egress constrained by `spec.egress`.
+
+                  MVP: exact match only (no wildcards).
+                items:
+                  type: string
+                type: array
               egress:
                 description: Egress destinations to allow.
                 items:

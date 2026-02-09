@@ -26,6 +26,19 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
+          rules:
+            dns:
+              # Default: only allow resolving in-cluster names (prevents DNS exfil
+              # when agents are otherwise "corp network off").
+              #
+              # NOTE: adjust `cluster.local` if your cluster domain differs, or if
+              # you use NodeLocalDNS with different endpoint labels.
+              - matchPattern: "*.cluster.local"
+              - matchPattern: "*.svc.cluster.local"
+              - matchPattern: "*.pod.cluster.local"
+              # Allow reverse lookups (typically handled by CoreDNS).
+              - matchPattern: "*.in-addr.arpa"
+              - matchPattern: "*.ip6.arpa"
     # Allow talking to the capability broker (so agents can request scoped unlocks).
     - toEndpoints:
         - matchLabels:

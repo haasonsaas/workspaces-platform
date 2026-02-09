@@ -150,6 +150,10 @@ type createNetworkGrantRequest struct {
 
 	Egress []workspacesv1alpha1.NetworkGrantEgressRule `json:"egress,omitempty"`
 
+	// DNSAllow optionally allows resolving additional DNS names (e.g. CNAME targets)
+	// without granting direct egress to those names.
+	DNSAllow []string `json:"dnsAllow,omitempty"`
+
 	AllowNon443 bool `json:"allowNon443,omitempty"`
 
 	TTLSeconds int32 `json:"ttlSeconds,omitempty"`
@@ -218,6 +222,7 @@ func (s *server) handleCreateNetworkGrant(w http.ResponseWriter, r *http.Request
 			Protocol:    req.Protocol,
 			Purpose:     strings.TrimSpace(req.Purpose),
 			Egress:      req.Egress,
+			DNSAllow:    req.DNSAllow,
 			AllowNon443: req.AllowNon443,
 			TTLSeconds:  req.TTLSeconds,
 			Approved:    false,
@@ -245,15 +250,16 @@ func (s *server) handleCreateNetworkGrant(w http.ResponseWriter, r *http.Request
 	if s.audit != nil {
 		reqID := middleware.GetReqID(ctx)
 		s.audit.Emit("networkgrant.request", map[string]any{
-			"request_id":    reqID,
-			"remote_addr":   r.RemoteAddr,
-			"namespace":     ng.Namespace,
-			"name":          ng.Name,
-			"agentjob":      strings.TrimSpace(req.AgentJob),
-			"egress_count":  len(req.Egress),
-			"purpose":       strings.TrimSpace(req.Purpose),
-			"ttl_seconds":   req.TTLSeconds,
-			"allow_non_443": req.AllowNon443,
+			"request_id":      reqID,
+			"remote_addr":     r.RemoteAddr,
+			"namespace":       ng.Namespace,
+			"name":            ng.Name,
+			"agentjob":        strings.TrimSpace(req.AgentJob),
+			"egress_count":    len(req.Egress),
+			"dns_allow_count": len(req.DNSAllow),
+			"purpose":         strings.TrimSpace(req.Purpose),
+			"ttl_seconds":     req.TTLSeconds,
+			"allow_non_443":   req.AllowNon443,
 		})
 	}
 

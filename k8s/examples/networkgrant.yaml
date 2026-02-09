@@ -18,3 +18,8 @@ spec:
       ports: [443]
     - host: api.github.com
       ports: [443]
+  # Optional: allow DNS resolution for additional names without granting egress.
+  # Useful if a granted hostname resolves via CNAME and your baseline DNS policy
+  # is strict.
+  # dnsAllow:
+  #   - github.map.fastly.net

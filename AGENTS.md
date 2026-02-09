@@ -86,6 +86,9 @@ MVP constraints (enforced by controller):
 - non-443 ports require `allowNon443: true`
 - `ttlSeconds` is capped (default max `7200`; configure via `NETWORKGRANT_MAX_TTL_SECONDS` or `--networkgrant-max-ttl-seconds`)
 - `egress` destinations are capped (default max `20`; configure via `NETWORKGRANT_MAX_EGRESS_RULES` or `--networkgrant-max-egress-rules`)
+- DNS is hardened by default (baseline policy only allows in-cluster DNS); approved `NetworkGrant`s add per-host DNS allow rules for their destinations
+- `dnsAllow` can be used to allow DNS resolution for additional names (e.g. CNAME targets) without granting direct egress to those names
+- DNS allow rules are capped (default max `50` unique names; configure via `NETWORKGRANT_MAX_DNS_NAMES` or `--networkgrant-max-dns-names`)
 
 ## Capability Broker (Choke Point)
 

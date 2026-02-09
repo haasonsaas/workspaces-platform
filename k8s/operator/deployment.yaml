@@ -24,6 +24,7 @@ spec:
             - "--health-probe-bind-address=:8081"
             - "--networkgrant-max-ttl-seconds=7200"
             - "--networkgrant-max-egress-rules=20"
+            - "--networkgrant-max-dns-names=50"
           ports:
             - name: metrics
               containerPort: 8080

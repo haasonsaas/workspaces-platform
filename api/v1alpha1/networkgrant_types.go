@@ -62,6 +62,13 @@ type NetworkGrantSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	Egress []NetworkGrantEgressRule `json:"egress"`
 
+	// DNSAllow adds additional DNS names the pod may resolve (DNS queries),
+	// without granting direct egress to those names. This is useful to allow
+	// CNAME chains while keeping egress constrained by `spec.egress`.
+	//
+	// MVP: exact match only (no wildcards).
+	DNSAllow []string `json:"dnsAllow,omitempty"`
+
 	// AllowNon443 allows non-443 ports in egress rules. Defaults to false.
 	AllowNon443 bool `json:"allowNon443,omitempty"`
 
