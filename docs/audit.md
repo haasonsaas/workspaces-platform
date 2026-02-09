@@ -49,6 +49,14 @@ Agent jobs (script mode) run via `cmd/agent-runner`, which also emits `AUDIT` re
 
 The file sink provides hash chaining (tamper-evident) but still needs append-only/WORM storage in production to prevent history rewrites.
 
+## Verifying Audit Chains
+
+This repo includes `cmd/auditctl` to verify file-sink chains locally:
+```bash
+go build ./cmd/auditctl
+./auditctl verify --events /path/to/events-broker-YYYY-MM-DD.jsonl --checkpoints /path/to/checkpoints-broker-YYYY-MM-DD.jsonl
+```
+
 ## Next Implementation Step
 
 1. Introduce an `audit-sink` that:

@@ -10,3 +10,4 @@ build:
 	go build ./cmd/github-webhook
 	go build ./cmd/wsctl
 	go build ./cmd/agent-runner
+	go build ./cmd/auditctl
