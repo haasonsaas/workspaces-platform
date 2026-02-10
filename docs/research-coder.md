@@ -44,7 +44,11 @@ Useful code landmarks:
 Coder provides a `config-ssh` command that:
 - writes a **managed section** into the user’s SSH config
 - makes `ssh workspace.coder` work via `ProxyCommand`
-- uses a CLI “stdio mode” so OpenSSH can treat it like a TCP transport
+- uses a CLI “stdio mode” so OpenSSH can treat it like a TCP transport (`coder ssh --stdio`)
+- supports both:
+  - a `Host <prefix>*` pattern, and
+  - a `Host *.<suffix>` pattern
+- optionally skips ProxyCommand when “Coder Connect” is available (it uses a `Match ... !exec "coder connect exists %h"` guard)
 
 Landmarks:
 - `cli/configssh.go`
@@ -98,9 +102,14 @@ Coder’s pattern suggests an alternative:
 This would reduce “gateway compromise” blast radius by removing direct apiserver capabilities.
 It’s more moving parts, so it should be an optional profile, not a day-1 requirement.
 
-This repo now includes an **experimental** proof-of-concept skeleton:
-- `cmd/ws-relayd`, `cmd/ws-relay`, `cmd/ws-desktop-agent`
-- design notes: `docs/connectivity.md`
+This repo includes an **experimental** reverse-tunnel implementation:
+- `Desktop.spec.connectivity.mode=relay`
+- operator mints per-desktop JWTs (`DESKTOP_RELAY_JWT_SECRET`) and injects a `ws-desktop-agent` sidecar
+- gateway runs `ws-relayd`; ProxyCommand uses `ws-relay` (see `docs/connectivity.md`)
+- reference images:
+  - `images/ws-desktop-agent/`
+  - `images/ws-relay/`
+  - `images/ws-relayd/`
 
 ### C) Port Sharing As A First-Class CRD (Future)
 
@@ -108,6 +117,11 @@ Coder’s “apps/port sharing” is a useful model for preview URLs:
 - explicit user intent (“share port 3000”)
 - scoped TTL and share levels (`owner`, `authenticated`, `organization`, `public`)
 - audit trail for exposures
+
+Coder also pairs “apps” with **signed tokens** and a dedicated proxy surface that enforces:
+- who may access the app (share level)
+- how it is accessed (subdomain/path routing rules)
+- telemetry/stats reporting for app traffic
 
 We should implement this as a CRD instead of ad-hoc port-forwarding:
 - `PortShare` (or `WorkspaceApp`) referencing a Desktop and a port
@@ -128,8 +142,10 @@ Coder also enforces a template-level "max port share level". The analogous contr
 
 ## Concrete Next Steps (If You Want To Go Further)
 
-1. Add a `ws-agent` proof-of-concept (reverse tunnel) as an **optional** desktop class.
-2. Add `PortShare` CRD and a minimal gateway reverse proxy to implement “preview URLs” with auth + TTL.
+1. Add a gateway/app proxy surface for `PortShare` that enforces share level + TTL.
+2. Decide how to authenticate preview/app requests:
+   - Tailscale identity (gateway host / local API) vs OIDC at an internal ingress
+   - signed tokens minted by capability-broker vs direct policy checks against Kubernetes
 3. Extend auditing:
    - log gateway → desktop connection metadata (start/stop, desktop id, duration)
    - keep “no keystrokes” for humans by default
