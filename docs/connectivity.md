@@ -66,6 +66,7 @@ What this mode does *not* solve yet:
   - `WS_RELAYD_JWT_SECRET` (required)
   - `WS_RELAYD_CONTROL_ADDR` (default `:7443`)
   - `WS_RELAYD_DATA_ADDR` (default `:7444`)
+  - `WS_RELAYD_SOCKET_MODE` / `WS_RELAYD_SOCKET_GID` so the SSH user running `ws-relay` can access the unix socket
 
 The `WS_RELAYD_JWT_SECRET` must match the operator's `DESKTOP_RELAY_JWT_SECRET`.
 

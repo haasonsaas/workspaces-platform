@@ -137,6 +137,30 @@ Flags:
 Env:
 - `WORKSPACES_HEARTBEAT_SECONDS` (default `300`): how often to update desktop `last-active-at` for autosuspend.
 
+## ws-relayd / ws-relay / ws-desktop-agent (experimental)
+
+These binaries implement an optional "reverse tunnel" connectivity mode for desktops (no gateway kubeconfig).
+
+Gateway host (ws-relayd):
+- `WS_RELAYD_CONTROL_ADDR` (default `:7443`)
+- `WS_RELAYD_DATA_ADDR` (default `:7444`)
+- `WS_RELAYD_SOCKET` (default `/var/run/ws-relayd.sock`): unix socket used by `ws-relay` ProxyCommand
+- `WS_RELAYD_SOCKET_MODE` (default `0600`): unix socket permissions (octal)
+- `WS_RELAYD_SOCKET_GID` (optional): unix socket group id (numeric gid)
+- `WS_RELAYD_JWT_SECRET` (recommended): HS256 key used to validate per-desktop JWT tokens (`sub=<namespace>/<desktop>`)
+- `WS_RELAYD_TOKENS_JSON` / `WS_RELAYD_TOKENS_FILE` (fallback): explicit token allowlist (avoid in prod)
+- `WS_RELAYD_ALLOWED_PORTS` (default `2222`): CSV allowlist of target ports
+- `WS_RELAYD_STREAM_TIMEOUT` (default `20s`): timeout waiting for an agent data connection
+
+Desktop sidecar (ws-desktop-agent):
+- `WS_RELAYD_CONTROL_ADDR` / `WS_RELAYD_DATA_ADDR`: relay endpoints
+- `WS_RELAY_KEY`: desktop key (`<namespace>/<desktop>`)
+- `WS_RELAY_TOKEN`: JWT token minted by the operator
+- `WS_RELAY_CONCURRENCY` (default `4`)
+
+ProxyCommand helper (ws-relay):
+- `WS_RELAYD_SOCKET` (default `/var/run/ws-relayd.sock`)
+
 ## agent-runner
 
 Binary: `cmd/agent-runner` (built into `images/agent-runner`)

@@ -117,6 +117,8 @@ func main() {
 		controlAddr = flag.String("control-addr", getenv("WS_RELAYD_CONTROL_ADDR", ":7443"), "TCP addr for agent control connections")
 		dataAddr    = flag.String("data-addr", getenv("WS_RELAYD_DATA_ADDR", ":7444"), "TCP addr for agent data connections")
 		socketPath  = flag.String("socket", getenv("WS_RELAYD_SOCKET", "/var/run/ws-relayd.sock"), "Unix socket path for local dial requests")
+		socketMode  = flag.String("socket-mode", getenv("WS_RELAYD_SOCKET_MODE", "0600"), "Unix socket file mode (octal, e.g. 0600 or 0660)")
+		socketGID   = flag.String("socket-gid", getenv("WS_RELAYD_SOCKET_GID", ""), "Unix socket group id (optional; numeric gid)")
 		jwtSecret   = flag.String("jwt-secret", getenv("WS_RELAYD_JWT_SECRET", ""), "HMAC secret for agent JWT auth (optional but recommended)")
 		tokensJSON  = flag.String("tokens-json", getenv("WS_RELAYD_TOKENS_JSON", ""), "JSON map of {\"namespace/desktop\":\"token\"}")
 		tokensFile  = flag.String("tokens-file", getenv("WS_RELAYD_TOKENS_FILE", ""), "Path to JSON tokens file (same format as --tokens-json)")
@@ -172,7 +174,16 @@ func main() {
 		log.Fatalf("listen socket: %v", err)
 	}
 	defer unixLn.Close()
-	_ = os.Chmod(*socketPath, 0o600)
+	if mode, err := parseSocketMode(*socketMode); err != nil {
+		log.Fatalf("socket mode: %v", err)
+	} else {
+		_ = os.Chmod(*socketPath, mode)
+	}
+	if gid, ok, err := parseOptionalGID(*socketGID); err != nil {
+		log.Fatalf("socket gid: %v", err)
+	} else if ok {
+		_ = os.Chown(*socketPath, -1, gid)
+	}
 
 	log.Printf("ws-relayd: control=%s data=%s socket=%s allowedPorts=%v", strings.TrimSpace(*controlAddr), strings.TrimSpace(*dataAddr), *socketPath, keysOf(allowedPorts))
 
@@ -559,6 +570,34 @@ func removeUnixSocketIfPresent(path string) error {
 		return fmt.Errorf("%s exists and is not a unix socket", path)
 	}
 	return os.Remove(path)
+}
+
+func parseSocketMode(raw string) (os.FileMode, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return 0, errors.New("empty mode")
+	}
+	// Interpret as octal (common for unix perms).
+	n, err := strconv.ParseUint(s, 8, 32)
+	if err != nil {
+		return 0, fmt.Errorf("invalid octal mode %q", s)
+	}
+	if n > 0o7777 {
+		return 0, fmt.Errorf("mode out of range %q", s)
+	}
+	return os.FileMode(n), nil
+}
+
+func parseOptionalGID(raw string) (gid int, ok bool, _ error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return 0, false, nil
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 0 {
+		return 0, false, fmt.Errorf("invalid gid %q", s)
+	}
+	return n, true, nil
 }
 
 func getenv(k, def string) string {
