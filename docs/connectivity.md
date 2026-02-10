@@ -45,7 +45,9 @@ This repo includes **experimental** binaries:
 - `cmd/ws-desktop-agent`: in-pod agent that bridges a stream to localhost
 
 Safety defaults in `ws-relayd`:
-- requires an explicit desktop token allowlist (`WS_RELAYD_TOKENS_JSON` or `WS_RELAYD_TOKENS_FILE`)
+- requires auth:
+  - preferred: JWT (`WS_RELAYD_JWT_SECRET`, HMAC-SHA256, `sub=<namespace>/<desktop>`)
+  - fallback: explicit token allowlist (`WS_RELAYD_TOKENS_JSON` or `WS_RELAYD_TOKENS_FILE`)
 - restricts target ports by default to `2222` only (`WS_RELAYD_ALLOWED_PORTS=2222`)
 
 What this mode does *not* solve yet:
@@ -63,4 +65,3 @@ Today, `ws-relayd` uses a static allowed port list as a stopgap.
 - ship Mode A first (it already works and is safe with minimal RBAC)
 - prototype Mode B in a separate node pool/profile for higher security needs
 - once Mode B is stable, consider making it the default for the most sensitive workflows
-

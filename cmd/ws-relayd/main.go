@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // ws-relayd is an experimental reverse-tunnel relay intended to reduce
@@ -77,7 +79,7 @@ func (a *agent) send(v any) error {
 }
 
 type server struct {
-	tokens map[string]string
+	auth authConfig
 
 	allowedPorts map[int]struct{}
 
@@ -85,6 +87,23 @@ type server struct {
 	agents map[string]*agent
 
 	pending map[string]*pendingStream
+}
+
+type authConfig struct {
+	tokens    map[string]string
+	jwtSecret []byte
+}
+
+func (a authConfig) validate(key, token string) bool {
+	if strings.TrimSpace(key) == "" || strings.TrimSpace(token) == "" {
+		return false
+	}
+	if len(a.jwtSecret) != 0 {
+		if validateJWT(a.jwtSecret, key, token) {
+			return true
+		}
+	}
+	return tokenMatches(a.tokens, key, token)
 }
 
 type pendingStream struct {
@@ -98,6 +117,7 @@ func main() {
 		controlAddr = flag.String("control-addr", getenv("WS_RELAYD_CONTROL_ADDR", ":7443"), "TCP addr for agent control connections")
 		dataAddr    = flag.String("data-addr", getenv("WS_RELAYD_DATA_ADDR", ":7444"), "TCP addr for agent data connections")
 		socketPath  = flag.String("socket", getenv("WS_RELAYD_SOCKET", "/var/run/ws-relayd.sock"), "Unix socket path for local dial requests")
+		jwtSecret   = flag.String("jwt-secret", getenv("WS_RELAYD_JWT_SECRET", ""), "HMAC secret for agent JWT auth (optional but recommended)")
 		tokensJSON  = flag.String("tokens-json", getenv("WS_RELAYD_TOKENS_JSON", ""), "JSON map of {\"namespace/desktop\":\"token\"}")
 		tokensFile  = flag.String("tokens-file", getenv("WS_RELAYD_TOKENS_FILE", ""), "Path to JSON tokens file (same format as --tokens-json)")
 		portsCSV    = flag.String("allowed-ports", getenv("WS_RELAYD_ALLOWED_PORTS", "2222"), "CSV of allowed target ports (default: 2222 only)")
@@ -109,8 +129,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("tokens: %v", err)
 	}
-	if len(tokens) == 0 {
-		log.Fatalf("no tokens configured (set WS_RELAYD_TOKENS_JSON or WS_RELAYD_TOKENS_FILE)")
+	secret := []byte(strings.TrimSpace(*jwtSecret))
+	if len(secret) == 0 && len(tokens) == 0 {
+		log.Fatalf("no auth configured (set WS_RELAYD_JWT_SECRET or WS_RELAYD_TOKENS_JSON/FILE)")
 	}
 
 	allowedPorts, err := parseAllowedPorts(*portsCSV)
@@ -119,7 +140,7 @@ func main() {
 	}
 
 	s := &server{
-		tokens:       tokens,
+		auth:         authConfig{tokens: tokens, jwtSecret: secret},
 		allowedPorts: allowedPorts,
 		agents:       map[string]*agent{},
 		pending:      map[string]*pendingStream{},
@@ -193,7 +214,7 @@ func (s *server) handleControlConn(c net.Conn) {
 		log.Printf("control handshake missing key/token")
 		return
 	}
-	if !tokenMatches(s.tokens, key, tok) {
+	if !s.auth.validate(key, tok) {
 		log.Printf("control handshake invalid token key=%q", key)
 		return
 	}
@@ -256,7 +277,7 @@ func (s *server) handleDataConn(c net.Conn) {
 		_ = c.Close()
 		return
 	}
-	if !tokenMatches(s.tokens, key, tok) {
+	if !s.auth.validate(key, tok) {
 		_ = c.Close()
 		return
 	}
@@ -408,6 +429,29 @@ func loadTokens(tokensJSON, tokensFile string) (map[string]string, error) {
 func tokenMatches(tokens map[string]string, key, token string) bool {
 	want := strings.TrimSpace(tokens[strings.TrimSpace(key)])
 	return want != "" && strings.TrimSpace(token) == want
+}
+
+func validateJWT(secret []byte, key, token string) bool {
+	claims := &jwt.RegisteredClaims{}
+	parsed, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (any, error) {
+		if t.Method == nil || t.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+			return nil, fmt.Errorf("unexpected jwt alg")
+		}
+		return secret, nil
+	})
+	if err != nil || parsed == nil || !parsed.Valid {
+		return false
+	}
+	sub := strings.TrimSpace(claims.Subject)
+	if sub == "" || sub != strings.TrimSpace(key) {
+		return false
+	}
+	// Enforce expiry when present. RegisteredClaims.Valid() checks exp/nbf when the
+	// parser has timefunc configured, but we keep this explicit and conservative.
+	if claims.ExpiresAt != nil && !claims.ExpiresAt.Time.IsZero() && time.Now().After(claims.ExpiresAt.Time) {
+		return false
+	}
+	return true
 }
 
 func parseAllowedPorts(csv string) (map[int]struct{}, error) {
