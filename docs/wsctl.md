@@ -46,6 +46,26 @@ Resume:
 wsctl desktop resume --name jonathan
 ```
 
+## SSH Config
+
+Generate a managed SSH config section (inserts/updates a `BEGIN/END workspaces-platform` block in `~/.ssh/config`):
+```bash
+wsctl ssh-config \
+  --gateway-hostname <tailscale-ip-or-hostname> \
+  --gateway-user <tailscale-ssh-user>
+```
+
+Dry-run (print unified diff only):
+```bash
+wsctl ssh-config --dry-run \
+  --gateway-hostname <tailscale-ip-or-hostname> \
+  --gateway-user <tailscale-ssh-user>
+```
+
+Notes:
+- The generated desktop hosts default to `HostName desktop-<name>-ssh.<namespace>` which does **not** need to resolve locally; it is passed to `ws-proxy` for parsing.
+- If you need a resolvable `HostName` (privileged gateway mode), set `--cluster-domain cluster.local` so entries use `<svc>.<ns>.svc.cluster.local`.
+
 ## AgentJob
 
 Create a simple agent job (Kata by default in the operator; this just creates the CR).

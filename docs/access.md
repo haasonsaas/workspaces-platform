@@ -27,6 +27,11 @@ Host desk-jonathan
   StrictHostKeyChecking accept-new
 ```
 
+You can generate and maintain this block automatically with:
+```bash
+wsctl ssh-config --gateway-hostname <tailscale-ip-or-hostname> --gateway-user <tailscale-ssh-user>
+```
+
 `ws-proxy` parses the host as `<service>.<namespace>...`, finds the Service selector, picks a ready pod, then port-forwards to the pod and proxies bytes.
 
 On each connection (and periodically while the session is open), `ws-proxy` updates the Desktop annotation `workspaces.platform.dev/last-active-at` (used for autosuspend).
