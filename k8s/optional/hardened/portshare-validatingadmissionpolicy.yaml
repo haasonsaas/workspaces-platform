@@ -1,0 +1,34 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: workspaces-portshare-guardrails
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: desktops
+    resourceRules:
+      - apiGroups: ["workspaces.platform.dev"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["portshares"]
+  validations:
+    # Disallow public shares by default (admins only).
+    - expression: "object.spec.shareLevel != 'public' || request.userInfo.groups.exists(g, g == 'system:masters')"
+      message: "public port shares are disabled by default (cluster admins only)"
+    # If a share is broader than owner-only, require a TTL so shares don't live forever.
+    - expression: "object.spec.shareLevel == 'owner' || object.spec.shareLevel == '' || object.spec.ttlSeconds > 0"
+      message: "ttlSeconds is required when shareLevel is not owner"
+    # TTL cap (1 day).
+    - expression: "object.spec.ttlSeconds == 0 || object.spec.ttlSeconds <= 86400"
+      message: "ttlSeconds must be <= 86400"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: workspaces-portshare-guardrails
+spec:
+  policyName: workspaces-portshare-guardrails
+  validationActions: [Deny]
+

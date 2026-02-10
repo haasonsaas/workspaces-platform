@@ -47,3 +47,5 @@ Expected resources:
   - audits access
   - routes to desktops via `ws-proxy` port-forward (not ClusterIP routing)
 
+Optional hardening:
+- `k8s/optional/hardened/portshare-validatingadmissionpolicy.yaml` denies `shareLevel=public` by default and requires a TTL for non-owner shares.

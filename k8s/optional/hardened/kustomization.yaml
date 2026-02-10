@@ -12,5 +12,6 @@ resources:
   - agentjob-validatingadmissionpolicy.yaml
   - desktops-validatingadmissionpolicy.yaml
   - desktop-validatingadmissionpolicy.yaml
+  - portshare-validatingadmissionpolicy.yaml
   - networkgrant-validatingadmissionpolicy.yaml
   - ciliumnetworkpolicy-validatingadmissionpolicy.yaml

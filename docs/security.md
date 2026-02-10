@@ -125,6 +125,7 @@ These manifests are optional so clusters without this feature can still run the 
 - `k8s/optional/hardened/agentjob-validatingadmissionpolicy.yaml`: enforces **AgentJob CR** guardrails (broker-only create/update, pinned image digests, runtime class constraints, policyProfile allowlist).
 - `k8s/optional/hardened/desktop-validatingadmissionpolicy.yaml`: enforces **Desktop CR** guardrails (pinned image digests when explicitly set).
 - `k8s/optional/hardened/networkgrant-validatingadmissionpolicy.yaml`: restricts **NetworkGrant** create/update to the capability-broker (prevents bypass via direct kubectl edits).
+- `k8s/optional/hardened/portshare-validatingadmissionpolicy.yaml`: enforces **PortShare** guardrails (disables `public` by default; requires TTL for non-owner shares).
 - `k8s/optional/hardened/ciliumnetworkpolicy-validatingadmissionpolicy.yaml`: restricts **CiliumNetworkPolicy** changes in `agents` to the operator (prevents bypass via direct Cilium policy injection).
 
 Additional hardened network policy (non-admission):
