@@ -44,6 +44,9 @@ This repo includes **experimental** binaries:
 - `cmd/ws-relay`: ProxyCommand client (runs on gateway via `ssh ws-gateway -- ws-relay ...`)
 - `cmd/ws-desktop-agent`: in-pod agent that bridges a stream to localhost
 
+SSH config helper:
+- `wsctl ssh-config --connectivity relay` generates a `ProxyCommand` that uses `ws-relay` on the gateway.
+
 Safety defaults in `ws-relayd`:
 - requires auth:
   - preferred: JWT (`WS_RELAYD_JWT_SECRET`, HMAC-SHA256, `sub=<namespace>/<desktop>`)

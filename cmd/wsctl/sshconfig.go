@@ -13,8 +13,8 @@ import (
 
 	"github.com/pmezard/go-difflib/difflib"
 
-	workspacesv1alpha1 "workspaces-platform/api/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	workspacesv1alpha1 "workspaces-platform/api/v1alpha1"
 )
 
 const (
@@ -26,6 +26,7 @@ type sshConfigOptions struct {
 	FilePath      string
 	DryRun        bool
 	Mode          string
+	Connectivity  string
 	SkipGateway   bool
 	GatewayAlias  string
 	GatewayHost   string
@@ -44,6 +45,7 @@ func cmdSSHConfig(args []string) {
 		filePath      = fs.String("file", "~/.ssh/config", "Path to ssh config file")
 		dryRun        = fs.Bool("dry-run", false, "Print a diff; do not write changes")
 		mode          = fs.String("mode", "pattern", "Mode: pattern (Coder-style) or list (enumerate Desktops via kubeconfig)")
+		connectivity  = fs.String("connectivity", "portforward", "Connectivity: portforward (ws-proxy) or relay (ws-relayd)")
 		skipGateway   = fs.Bool("skip-gateway", false, "Do not manage the gateway Host entry")
 		gatewayAlias  = fs.String("gateway-alias", "ws-gateway", "SSH Host alias for the gateway")
 		gatewayHost   = fs.String("gateway-hostname", "", "Gateway hostname/IP (required unless --skip-gateway)")
@@ -61,6 +63,7 @@ func cmdSSHConfig(args []string) {
 		FilePath:      strings.TrimSpace(*filePath),
 		DryRun:        *dryRun,
 		Mode:          strings.ToLower(strings.TrimSpace(*mode)),
+		Connectivity:  strings.ToLower(strings.TrimSpace(*connectivity)),
 		SkipGateway:   *skipGateway,
 		GatewayAlias:  strings.TrimSpace(*gatewayAlias),
 		GatewayHost:   strings.TrimSpace(*gatewayHost),
@@ -81,6 +84,11 @@ func cmdSSHConfig(args []string) {
 	case "pattern", "list":
 	default:
 		die("invalid --mode (expected pattern|list)")
+	}
+	switch opts.Connectivity {
+	case "", "portforward", "relay":
+	default:
+		die("invalid --connectivity (expected portforward|relay)")
 	}
 	if opts.GatewayAlias == "" && !opts.SkipGateway {
 		die("missing --gateway-alias")
@@ -103,21 +111,35 @@ func cmdSSHConfig(args []string) {
 		if opts.DesktopUser == "" {
 			die("pattern mode requires --desktop-user (or set USER)")
 		}
-		wsctlBin := opts.WsctlBinary
-		if wsctlBin == "" {
-			if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
-				wsctlBin = exe
-			} else {
-				wsctlBin = "wsctl"
+
+		switch opts.Connectivity {
+		case "", "portforward":
+			wsctlBin := opts.WsctlBinary
+			if wsctlBin == "" {
+				if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
+					wsctlBin = exe
+				} else {
+					wsctlBin = "wsctl"
+				}
 			}
+			opts.WsctlBinary = wsctlBin
+			opts.ProxyCommand = fmt.Sprintf("%s proxy --gateway %s --namespace %s --host-prefix %s %%h %%p",
+				shellWord(wsctlBin),
+				shellWord(opts.GatewayAlias),
+				shellWord(opts.Namespace),
+				shellWord(opts.HostPrefix),
+			)
+		case "relay":
+			// Relay mode assumes ws-relayd runs on the gateway host and ws-relay is installed there.
+			// This keeps the gateway free of Kubernetes API credentials.
+			opts.ProxyCommand = fmt.Sprintf("ssh %s -- ws-relay proxy --namespace %s --host-prefix %s %%h %%p",
+				shellWord(opts.GatewayAlias),
+				shellWord(opts.Namespace),
+				shellWord(opts.HostPrefix),
+			)
+		default:
+			die("invalid connectivity")
 		}
-		opts.WsctlBinary = wsctlBin
-		opts.ProxyCommand = fmt.Sprintf("%s proxy --gateway %s --namespace %s --host-prefix %s %%h %%p",
-			shellWord(wsctlBin),
-			shellWord(opts.GatewayAlias),
-			shellWord(opts.Namespace),
-			shellWord(opts.HostPrefix),
-		)
 	}
 
 	var desktops []workspacesv1alpha1.Desktop

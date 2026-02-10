@@ -34,6 +34,14 @@ wsctl ssh-config \
   --desktop-user <linux-user-in-desktop>
 ```
 
+Experimental: reverse-tunnel mode (no gateway kubeconfig; requires `ws-relayd` on the gateway and `ws-desktop-agent` in desktops):
+```bash
+wsctl ssh-config --connectivity relay \
+  --gateway-hostname <tailscale-ip-or-hostname> \
+  --gateway-user <tailscale-ssh-user> \
+  --desktop-user <linux-user-in-desktop>
+```
+
 `ws-proxy` parses the host as `<service>.<namespace>...`, finds the Service selector, picks a ready pod, then port-forwards to the pod and proxies bytes.
 
 On each connection (and periodically while the session is open), `ws-proxy` updates the Desktop annotation `workspaces.platform.dev/last-active-at` (used for autosuspend).

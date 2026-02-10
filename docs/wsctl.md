@@ -62,6 +62,14 @@ wsctl ssh-config \
   --desktop-user <linux-user-in-desktop>
 ```
 
+Experimental: reverse-tunnel mode (requires `ws-relayd` + `ws-relay` on the gateway, and `ws-desktop-agent` in the desktop):
+```bash
+wsctl ssh-config --connectivity relay \
+  --gateway-hostname <tailscale-ip-or-hostname> \
+  --gateway-user <tailscale-ssh-user> \
+  --desktop-user <linux-user-in-desktop>
+```
+
 Dry-run (print unified diff only):
 ```bash
 wsctl ssh-config --dry-run \
