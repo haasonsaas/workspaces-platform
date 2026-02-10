@@ -25,6 +25,7 @@ const (
 type sshConfigOptions struct {
 	FilePath      string
 	DryRun        bool
+	Mode          string
 	SkipGateway   bool
 	GatewayAlias  string
 	GatewayHost   string
@@ -32,6 +33,8 @@ type sshConfigOptions struct {
 	Namespace     string
 	HostPrefix    string
 	ClusterDomain string
+	DesktopUser   string
+	WsctlBinary   string
 	ProxyCommand  string
 }
 
@@ -40,20 +43,24 @@ func cmdSSHConfig(args []string) {
 	var (
 		filePath      = fs.String("file", "~/.ssh/config", "Path to ssh config file")
 		dryRun        = fs.Bool("dry-run", false, "Print a diff; do not write changes")
+		mode          = fs.String("mode", "pattern", "Mode: pattern (Coder-style) or list (enumerate Desktops via kubeconfig)")
 		skipGateway   = fs.Bool("skip-gateway", false, "Do not manage the gateway Host entry")
 		gatewayAlias  = fs.String("gateway-alias", "ws-gateway", "SSH Host alias for the gateway")
 		gatewayHost   = fs.String("gateway-hostname", "", "Gateway hostname/IP (required unless --skip-gateway)")
 		gatewayUser   = fs.String("gateway-user", "", "Gateway SSH user (optional)")
-		namespace     = fs.String("namespace", "desktops", "Namespace to list Desktops from")
-		hostPrefix    = fs.String("host-prefix", "desk-", "Prefix for generated desktop Host aliases")
+		namespace     = fs.String("namespace", "desktops", "Desktop namespace")
+		hostPrefix    = fs.String("host-prefix", "desk-", "Desktop Host prefix/glob (pattern mode uses Host <prefix>*)")
 		clusterDomain = fs.String("cluster-domain", "", "If set, use <svc>.<ns>.svc.<cluster-domain> for HostName (otherwise <svc>.<ns>)")
-		proxyCommand  = fs.String("proxy-command", "", "Override ProxyCommand (default: ssh <gateway-alias> -- ws-proxy %h %p)")
+		desktopUser   = fs.String("desktop-user", os.Getenv("USER"), "Desktop SSH username (pattern mode only)")
+		wsctlBinary   = fs.String("wsctl-binary", "", "Path to wsctl binary to embed in ProxyCommand (pattern mode only; default: this executable)")
+		proxyCommand  = fs.String("proxy-command", "", "Override ProxyCommand (advanced)")
 	)
 	fs.Parse(args)
 
 	opts := sshConfigOptions{
 		FilePath:      strings.TrimSpace(*filePath),
 		DryRun:        *dryRun,
+		Mode:          strings.ToLower(strings.TrimSpace(*mode)),
 		SkipGateway:   *skipGateway,
 		GatewayAlias:  strings.TrimSpace(*gatewayAlias),
 		GatewayHost:   strings.TrimSpace(*gatewayHost),
@@ -61,6 +68,8 @@ func cmdSSHConfig(args []string) {
 		Namespace:     strings.TrimSpace(*namespace),
 		HostPrefix:    strings.TrimSpace(*hostPrefix),
 		ClusterDomain: strings.TrimSpace(*clusterDomain),
+		DesktopUser:   strings.TrimSpace(*desktopUser),
+		WsctlBinary:   strings.TrimSpace(*wsctlBinary),
 		ProxyCommand:  strings.TrimSpace(*proxyCommand),
 	}
 
@@ -68,6 +77,11 @@ func cmdSSHConfig(args []string) {
 		die("missing --file")
 	}
 	opts.FilePath = expandHomePath(opts.FilePath)
+	switch opts.Mode {
+	case "pattern", "list":
+	default:
+		die("invalid --mode (expected pattern|list)")
+	}
 	if opts.GatewayAlias == "" && !opts.SkipGateway {
 		die("missing --gateway-alias")
 	}
@@ -77,23 +91,50 @@ func cmdSSHConfig(args []string) {
 	if !opts.SkipGateway && opts.GatewayHost == "" {
 		die("missing --gateway-hostname (or set --skip-gateway)")
 	}
-	if opts.ProxyCommand == "" {
+	if opts.ProxyCommand == "" && opts.Mode == "list" {
 		// ProxyCommand runs on the user's machine and executes on the gateway.
 		// ws-proxy lives on the gateway and uses K8s port-forward to reach the desktop pod.
 		opts.ProxyCommand = fmt.Sprintf("ssh %s -- ws-proxy %%h %%p", opts.GatewayAlias)
 	}
+	if opts.ProxyCommand == "" && opts.Mode == "pattern" {
+		if opts.HostPrefix == "" {
+			die("pattern mode requires --host-prefix (e.g. desk-)")
+		}
+		if opts.DesktopUser == "" {
+			die("pattern mode requires --desktop-user (or set USER)")
+		}
+		wsctlBin := opts.WsctlBinary
+		if wsctlBin == "" {
+			if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
+				wsctlBin = exe
+			} else {
+				wsctlBin = "wsctl"
+			}
+		}
+		opts.WsctlBinary = wsctlBin
+		opts.ProxyCommand = fmt.Sprintf("%s proxy --gateway %s --namespace %s --host-prefix %s %%h %%p",
+			shellWord(wsctlBin),
+			shellWord(opts.GatewayAlias),
+			shellWord(opts.Namespace),
+			shellWord(opts.HostPrefix),
+		)
+	}
 
-	k, err := newK8sClient()
-	dieIf(err)
+	var desktops []workspacesv1alpha1.Desktop
+	if opts.Mode == "list" {
+		k, err := newK8sClient()
+		dieIf(err)
 
-	var list workspacesv1alpha1.DesktopList
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	dieIf(k.List(ctx, &list, client.InNamespace(opts.Namespace)))
+		var list workspacesv1alpha1.DesktopList
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		dieIf(k.List(ctx, &list, client.InNamespace(opts.Namespace)))
 
-	sort.Slice(list.Items, func(i, j int) bool { return list.Items[i].Name < list.Items[j].Name })
+		sort.Slice(list.Items, func(i, j int) bool { return list.Items[i].Name < list.Items[j].Name })
+		desktops = list.Items
+	}
 
-	section, err := renderSSHConfigSection(opts, list.Items)
+	section, err := renderSSHConfigSection(opts, desktops)
 	dieIf(err)
 
 	oldBytes, oldMode, err := readSSHConfigFile(opts.FilePath)
@@ -136,29 +177,40 @@ func renderSSHConfigSection(opts sshConfigOptions, desktops []workspacesv1alpha1
 		b.WriteString("\n")
 	}
 
-	cd := normalizeClusterDomain(opts.ClusterDomain)
-	for _, d := range desktops {
-		user := strings.TrimSpace(d.Spec.User)
-		if user == "" {
-			// Skip malformed objects (operator would also treat these as non-runnable).
-			continue
-		}
-		alias := opts.HostPrefix + d.Name
-
-		svc := fmt.Sprintf("desktop-%s-ssh", d.Name)
-		host := svc + "." + d.Namespace
-		if cd != "" {
-			host = host + ".svc." + cd
-		}
-
-		b.WriteString("Host " + alias + "\n")
-		b.WriteString("  HostName " + host + "\n")
-		b.WriteString("  User " + user + "\n")
+	switch opts.Mode {
+	case "pattern":
+		pat := opts.HostPrefix + "*"
+		b.WriteString("Host " + pat + "\n")
+		b.WriteString("  User " + strings.TrimSpace(opts.DesktopUser) + "\n")
 		b.WriteString("  ProxyCommand " + opts.ProxyCommand + "\n")
-		// Host keys are persisted on the home PVC in the default desktop image,
-		// so accept-new is reasonable and keeps UX smooth.
 		b.WriteString("  StrictHostKeyChecking accept-new\n")
 		b.WriteString("\n")
+
+	case "list":
+		cd := normalizeClusterDomain(opts.ClusterDomain)
+		for _, d := range desktops {
+			user := strings.TrimSpace(d.Spec.User)
+			if user == "" {
+				// Skip malformed objects (operator would also treat these as non-runnable).
+				continue
+			}
+			alias := opts.HostPrefix + d.Name
+
+			svc := fmt.Sprintf("desktop-%s-ssh", d.Name)
+			host := svc + "." + d.Namespace
+			if cd != "" {
+				host = host + ".svc." + cd
+			}
+
+			b.WriteString("Host " + alias + "\n")
+			b.WriteString("  HostName " + host + "\n")
+			b.WriteString("  User " + user + "\n")
+			b.WriteString("  ProxyCommand " + opts.ProxyCommand + "\n")
+			b.WriteString("  StrictHostKeyChecking accept-new\n")
+			b.WriteString("\n")
+		}
+	default:
+		return nil, fmt.Errorf("invalid mode %q", opts.Mode)
 	}
 
 	b.WriteString(sshConfigSectionEnd)
@@ -169,6 +221,19 @@ func normalizeClusterDomain(in string) string {
 	s := strings.TrimSpace(in)
 	s = strings.TrimPrefix(s, ".")
 	s = strings.TrimSuffix(s, ".")
+	return s
+}
+
+func shellWord(s string) string {
+	// Best-effort: OpenSSH executes ProxyCommand using the user's shell.
+	// Avoid being clever; just quote things with spaces.
+	if s == "" {
+		return "''"
+	}
+	if strings.ContainsAny(s, " \t\r\n") {
+		s = strings.ReplaceAll(s, "'", "'\\''")
+		return "'" + s + "'"
+	}
 	return s
 }
 
@@ -277,4 +342,3 @@ func unifiedDiffString(path string, oldBytes, newBytes []byte) string {
 	}
 	return s
 }
-

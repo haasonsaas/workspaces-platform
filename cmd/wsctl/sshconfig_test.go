@@ -81,9 +81,10 @@ func TestUpsertSSHConfigSection_Replaces(t *testing.T) {
 	}
 }
 
-func TestRenderSSHConfigSection(t *testing.T) {
+func TestRenderSSHConfigSection_List(t *testing.T) {
 	opts := sshConfigOptions{
 		SkipGateway:  false,
+		Mode:         "list",
 		GatewayAlias: "ws-gateway",
 		GatewayHost:  "100.64.0.1",
 		GatewayUser:  "ts",
@@ -108,5 +109,30 @@ func TestRenderSSHConfigSection(t *testing.T) {
 	}
 	if !strings.Contains(s, "ProxyCommand ssh ws-gateway -- ws-proxy") {
 		t.Fatalf("missing proxycommand: %q", s)
+	}
+}
+
+func TestRenderSSHConfigSection_Pattern(t *testing.T) {
+	opts := sshConfigOptions{
+		SkipGateway:  true,
+		Mode:         "pattern",
+		HostPrefix:   "desk-",
+		DesktopUser:  "jonathan",
+		ProxyCommand: "wsctl proxy --gateway ws-gateway --namespace desktops --host-prefix desk- %h %p",
+	}
+
+	sec, err := renderSSHConfigSection(opts, nil)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	s := string(sec)
+	if !strings.Contains(s, "Host desk-*") {
+		t.Fatalf("missing pattern Host: %q", s)
+	}
+	if !strings.Contains(s, "User jonathan") {
+		t.Fatalf("missing User: %q", s)
+	}
+	if !strings.Contains(s, "ProxyCommand wsctl proxy") {
+		t.Fatalf("missing ProxyCommand: %q", s)
 	}
 }

@@ -20,16 +20,18 @@ Host ws-gateway
   HostName <tailscale-ip-or-hostname>
   User <tailscale-ssh-user>
 
-Host desk-jonathan
-  HostName desktop-jonathan-ssh.desktops.svc.cluster.local
-  User jonathan
-  ProxyCommand ssh ws-gateway -- ws-proxy %h %p
+Host desk-*
+  User <linux-user-in-desktop>
+  ProxyCommand wsctl proxy --gateway ws-gateway --namespace desktops --host-prefix desk- %h %p
   StrictHostKeyChecking accept-new
 ```
 
 You can generate and maintain this block automatically with:
 ```bash
-wsctl ssh-config --gateway-hostname <tailscale-ip-or-hostname> --gateway-user <tailscale-ssh-user>
+wsctl ssh-config \
+  --gateway-hostname <tailscale-ip-or-hostname> \
+  --gateway-user <tailscale-ssh-user> \
+  --desktop-user <linux-user-in-desktop>
 ```
 
 `ws-proxy` parses the host as `<service>.<namespace>...`, finds the Service selector, picks a ready pod, then port-forwards to the pod and proxies bytes.

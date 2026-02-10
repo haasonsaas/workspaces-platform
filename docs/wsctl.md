@@ -48,23 +48,32 @@ wsctl desktop resume --name jonathan
 
 ## SSH Config
 
-Generate a managed SSH config section (inserts/updates a `BEGIN/END workspaces-platform` block in `~/.ssh/config`):
+Generate a managed SSH config section (inserts/updates a `BEGIN/END workspaces-platform` block in `~/.ssh/config`).
+
+Default mode is `pattern` (Coder-style): it does **not** require direct Kubernetes access on your laptop.
+It generates:
+- a `Host ws-gateway` entry (Tailscale SSH)
+- a `Host desk-*` entry that uses `ProxyCommand wsctl proxy ...` to map `desk-<name>` to `desktop-<name>-ssh.desktops` on the gateway
+
 ```bash
 wsctl ssh-config \
   --gateway-hostname <tailscale-ip-or-hostname> \
-  --gateway-user <tailscale-ssh-user>
+  --gateway-user <tailscale-ssh-user> \
+  --desktop-user <linux-user-in-desktop>
 ```
 
 Dry-run (print unified diff only):
 ```bash
 wsctl ssh-config --dry-run \
   --gateway-hostname <tailscale-ip-or-hostname> \
-  --gateway-user <tailscale-ssh-user>
+  --gateway-user <tailscale-ssh-user> \
+  --desktop-user <linux-user-in-desktop>
 ```
 
 Notes:
-- The generated desktop hosts default to `HostName desktop-<name>-ssh.<namespace>` which does **not** need to resolve locally; it is passed to `ws-proxy` for parsing.
-- If you need a resolvable `HostName` (privileged gateway mode), set `--cluster-domain cluster.local` so entries use `<svc>.<ns>.svc.cluster.local`.
+- After generating config, connect with `ssh desk-<desktopName>`.
+- `wsctl proxy` is intended to be run by OpenSSH as a `ProxyCommand` and must not print to stdout.
+- If you need per-desktop users or explicit host entries, use `--mode list` (requires kubeconfig access).
 
 ## AgentJob
 

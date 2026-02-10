@@ -73,9 +73,9 @@ Landmarks:
 ### A) `wsctl ssh-config` (Coder-inspired)
 
 We want the same “one command makes SSH work” loop.
-This repo now includes `wsctl ssh-config`, which writes a managed SSH config block for:
-- the gateway (Tailscale SSH edge)
-- all Desktops in a namespace
+This repo includes `wsctl ssh-config`, which writes a managed SSH config block:
+- default (`--mode pattern`): `Host desk-*` + `ProxyCommand wsctl proxy ...` (Coder-style, no kubeconfig needed on the laptop)
+- optional (`--mode list`): explicit `Host desk-<name>` entries (requires kubeconfig to enumerate Desktops)
 
 Why it matters:
 - VS Code Remote adoption depends on SSH ergonomics
@@ -124,4 +124,3 @@ We should implement this as a CRD instead of ad-hoc port-forwarding:
 3. Extend auditing:
    - log gateway → desktop connection metadata (start/stop, desktop id, duration)
    - keep “no keystrokes” for humans by default
-
