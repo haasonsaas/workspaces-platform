@@ -8,12 +8,19 @@ Binary: `cmd/workspaces-operator`
 
 Flags:
 - `--default-desktop-image` (env: `DEFAULT_DESKTOP_IMAGE`): image used when `Desktop.spec.image` is empty.
+- `--desktop-relay-agent-image` (env: `DESKTOP_RELAY_AGENT_IMAGE`): sidecar image used when `Desktop.spec.connectivity.mode=relay`.
+- `--desktop-relayd-control-addr` (env: `DESKTOP_RELAYD_CONTROL_ADDR`): ws-relayd control addr reachable from Desktop pods (host:port).
+- `--desktop-relayd-data-addr` (env: `DESKTOP_RELAYD_DATA_ADDR`): ws-relayd data addr reachable from Desktop pods (host:port).
+- `--desktop-relay-jwt-ttl-seconds` (env: `DESKTOP_RELAY_JWT_TTL_SECONDS`): relay JWT TTL seconds minted per Desktop. Default `86400`.
 - `--default-agent-runtimeclass` (env: `DEFAULT_AGENT_RUNTIMECLASS`): RuntimeClass used when `AgentJob.spec.runtimeClassName` is empty.
 - `--agent-egress-proxy-url` (env: `AGENT_EGRESS_PROXY_URL`): when set, injects `HTTP(S)_PROXY`/`ALL_PROXY` into AgentJob pods (CONNECT proxy mode).
 - `--agent-no-proxy` (env: `AGENT_NO_PROXY`): `NO_PROXY` value injected into AgentJob pods when `AGENT_EGRESS_PROXY_URL` is set.
 - `--networkgrant-max-ttl-seconds` (env: `NETWORKGRANT_MAX_TTL_SECONDS`): max `NetworkGrant.spec.ttlSeconds` allowed (0 disables cap). Default `7200`.
 - `--networkgrant-max-egress-rules` (env: `NETWORKGRANT_MAX_EGRESS_RULES`): max `NetworkGrant.spec.egress` rules allowed (0 disables cap). Default `20`.
 - `--networkgrant-max-dns-names` (env: `NETWORKGRANT_MAX_DNS_NAMES`): max unique DNS names allowed for DNS L7 allow rules (union of `spec.egress.host` and `spec.dnsAllow`). Default `50`.
+
+Env (relay mode only):
+- `DESKTOP_RELAY_JWT_SECRET` (required to enable `spec.connectivity.mode=relay`): HS256 signing key used by the operator to mint per-desktop relay JWTs. Must match `WS_RELAYD_JWT_SECRET` on the gateway host.
 
 ## capability-broker
 

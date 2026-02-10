@@ -35,6 +35,36 @@ spec:
                   name: workspaces-operator-config
                   key: agent_no_proxy
                   optional: true
+            - name: DESKTOP_RELAY_AGENT_IMAGE
+              valueFrom:
+                configMapKeyRef:
+                  name: workspaces-operator-config
+                  key: desktop_relay_agent_image
+                  optional: true
+            - name: DESKTOP_RELAYD_CONTROL_ADDR
+              valueFrom:
+                configMapKeyRef:
+                  name: workspaces-operator-config
+                  key: desktop_relayd_control_addr
+                  optional: true
+            - name: DESKTOP_RELAYD_DATA_ADDR
+              valueFrom:
+                configMapKeyRef:
+                  name: workspaces-operator-config
+                  key: desktop_relayd_data_addr
+                  optional: true
+            - name: DESKTOP_RELAY_JWT_TTL_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: workspaces-operator-config
+                  key: desktop_relay_jwt_ttl_seconds
+                  optional: true
+            - name: DESKTOP_RELAY_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: workspaces-operator-secrets
+                  key: desktop_relay_jwt_secret
+                  optional: true
           args:
             - "--leader-elect=true"
             - "--metrics-bind-address=:8080"

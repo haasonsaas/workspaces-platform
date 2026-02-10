@@ -5,6 +5,10 @@ metadata:
   namespace: desktops
 spec:
   user: jonathan
+  # Optional: reverse-tunnel connectivity (requires ws-relayd on the gateway and
+  # operator relay config; see docs/connectivity.md).
+  # connectivity:
+  #   mode: relay
   ssh:
     authorizedKeys:
       # TODO: replace with your public key(s)

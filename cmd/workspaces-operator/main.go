@@ -4,6 +4,8 @@ import (
 	"flag"
 	"os"
 	"strconv"
+	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -30,6 +32,10 @@ func main() {
 	var enableLeaderElection bool
 	var leaderElectionID string
 	var defaultDesktopImage string
+	var desktopRelayAgentImage string
+	var desktopRelaydControlAddr string
+	var desktopRelaydDataAddr string
+	var desktopRelayJWTTTLSeconds int
 	var defaultAgentRuntimeClass string
 	var agentEgressProxyURL string
 	var agentNoProxy string
@@ -42,6 +48,10 @@ func main() {
 	flag.BoolVar(&enableLeaderElection, "leader-elect", true, "Enable leader election for controller manager.")
 	flag.StringVar(&leaderElectionID, "leader-election-id", "workspaces-operator.workspaces.platform.dev", "Leader election ID.")
 	flag.StringVar(&defaultDesktopImage, "default-desktop-image", getenv("DEFAULT_DESKTOP_IMAGE", "ghcr.io/haasonsaas/workspaces-desktop:latest"), "Default desktop image if Desktop.spec.image is empty.")
+	flag.StringVar(&desktopRelayAgentImage, "desktop-relay-agent-image", getenv("DESKTOP_RELAY_AGENT_IMAGE", "ghcr.io/haasonsaas/workspaces-ws-desktop-agent:latest"), "Image for ws-desktop-agent sidecar when Desktop.spec.connectivity.mode=relay.")
+	flag.StringVar(&desktopRelaydControlAddr, "desktop-relayd-control-addr", getenv("DESKTOP_RELAYD_CONTROL_ADDR", ""), "ws-relayd control addr reachable from desktop pods (host:port).")
+	flag.StringVar(&desktopRelaydDataAddr, "desktop-relayd-data-addr", getenv("DESKTOP_RELAYD_DATA_ADDR", ""), "ws-relayd data addr reachable from desktop pods (host:port).")
+	flag.IntVar(&desktopRelayJWTTTLSeconds, "desktop-relay-jwt-ttl-seconds", intFromEnv("DESKTOP_RELAY_JWT_TTL_SECONDS", 86400), "TTL seconds for per-desktop relay JWT tokens minted by the operator.")
 	flag.StringVar(&defaultAgentRuntimeClass, "default-agent-runtimeclass", getenv("DEFAULT_AGENT_RUNTIMECLASS", "kata"), "Default RuntimeClassName for AgentJobs.")
 	flag.StringVar(&agentEgressProxyURL, "agent-egress-proxy-url", getenv("AGENT_EGRESS_PROXY_URL", ""), "HTTP proxy URL injected into AgentJob pods as HTTP(S)_PROXY/ALL_PROXY (optional).")
 	flag.StringVar(&agentNoProxy, "agent-no-proxy", getenv("AGENT_NO_PROXY", ""), "NO_PROXY injected into AgentJob pods when agent egress proxy is set (optional).")
@@ -64,6 +74,12 @@ func main() {
 		maxGrantDNSNames = 0
 	}
 
+	relayJWTSecret := []byte(strings.TrimSpace(getenv("DESKTOP_RELAY_JWT_SECRET", "")))
+	relayJWTTTL := time.Duration(desktopRelayJWTTTLSeconds) * time.Second
+	if relayJWTTTL <= 0 {
+		relayJWTTTL = 24 * time.Hour
+	}
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
@@ -79,9 +95,14 @@ func main() {
 	}
 
 	if err := (&controller.DesktopReconciler{
-		Client:              mgr.GetClient(),
-		Scheme:              mgr.GetScheme(),
-		DefaultDesktopImage: defaultDesktopImage,
+		Client:                   mgr.GetClient(),
+		Scheme:                   mgr.GetScheme(),
+		DefaultDesktopImage:      defaultDesktopImage,
+		DesktopRelayAgentImage:   desktopRelayAgentImage,
+		DesktopRelaydControlAddr: desktopRelaydControlAddr,
+		DesktopRelaydDataAddr:    desktopRelaydDataAddr,
+		DesktopRelayJWTSecret:    relayJWTSecret,
+		DesktopRelayJWTTTL:       relayJWTTTL,
 	}).SetupWithManager(mgr); err != nil {
 		ctrl.Log.Error(err, "unable to create controller", "controller", "Desktop")
 		os.Exit(1)

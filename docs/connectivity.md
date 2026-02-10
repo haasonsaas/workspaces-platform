@@ -54,9 +54,55 @@ Safety defaults in `ws-relayd`:
 - restricts target ports by default to `2222` only (`WS_RELAYD_ALLOWED_PORTS=2222`)
 
 What this mode does *not* solve yet:
-- automatic token provisioning + rotation (should be done by the operator)
 - tying dial permissions to user identity (today it relies on unix socket permissions + Tailscale SSH host auth)
+- autosuspend heartbeats (today `ws-proxy` updates last-active; relay mode needs a separate signal path)
 - "preview URLs" and `PortShare` enforcement (future integration)
+
+## How To Enable Relay Mode (End-to-End)
+
+1. Configure the gateway host:
+
+- run `ws-relayd` (host service) and set:
+  - `WS_RELAYD_JWT_SECRET` (required)
+  - `WS_RELAYD_CONTROL_ADDR` (default `:7443`)
+  - `WS_RELAYD_DATA_ADDR` (default `:7444`)
+
+The `WS_RELAYD_JWT_SECRET` must match the operator's `DESKTOP_RELAY_JWT_SECRET`.
+
+2. Configure the operator:
+
+- Create the operator Secret (example):
+  - `k8s/examples/workspaces-operator-secrets.yaml` (key: `desktop_relay_jwt_secret`)
+- Set the operator ConfigMap keys:
+  - `desktop_relayd_control_addr` and `desktop_relayd_data_addr` to addresses reachable from Desktop pods (often a LAN/VIP address to the gateway host).
+  - `desktop_relay_agent_image` (defaults to `ghcr.io/haasonsaas/workspaces-ws-desktop-agent:latest`).
+
+3. Create a Desktop with relay mode enabled:
+
+```yaml
+apiVersion: workspaces.platform.dev/v1alpha1
+kind: Desktop
+metadata:
+  name: jonathan
+  namespace: desktops
+spec:
+  user: jonathan
+  connectivity:
+    mode: relay
+```
+
+Or via CLI:
+```bash
+wsctl desktop create ... --connectivity relay
+```
+
+4. Generate SSH config using relay connectivity:
+
+```bash
+wsctl ssh-config --connectivity relay ...
+```
+
+This generates a `ProxyCommand` that runs `ws-relay` on the gateway to request a reverse-tunnel stream via `ws-relayd`.
 
 ## How This Connects To `PortShare`
 

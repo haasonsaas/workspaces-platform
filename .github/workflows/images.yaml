@@ -36,6 +36,12 @@ jobs:
             dockerfile: images/auditship/Dockerfile
           - name: workspaces-ws-proxy
             dockerfile: images/ws-proxy/Dockerfile
+          - name: workspaces-ws-desktop-agent
+            dockerfile: images/ws-desktop-agent/Dockerfile
+          - name: workspaces-ws-relay
+            dockerfile: images/ws-relay/Dockerfile
+          - name: workspaces-ws-relayd
+            dockerfile: images/ws-relayd/Dockerfile
 
     steps:
       - name: Checkout
@@ -64,4 +70,3 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}:sha-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-

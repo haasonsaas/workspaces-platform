@@ -9,3 +9,13 @@ data:
   agent_egress_proxy_url: "http://egress-proxy.workspaces-system.svc.cluster.local:8080"
   agent_no_proxy: "localhost,127.0.0.1,.svc,.cluster.local"
 
+  # Desktop reverse-tunnel (relay) mode. These settings are only used when a
+  # Desktop has `spec.connectivity.mode=relay`.
+  #
+  # The ws-relayd endpoints MUST be reachable from Desktop pods (typically via a
+  # LAN/VIP address to the gateway host). This intentionally avoids granting the
+  # gateway kubeconfig access.
+  desktop_relay_agent_image: "ghcr.io/haasonsaas/workspaces-ws-desktop-agent:latest"
+  desktop_relayd_control_addr: ""
+  desktop_relayd_data_addr: ""
+  desktop_relay_jwt_ttl_seconds: "86400"

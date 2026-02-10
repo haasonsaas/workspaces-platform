@@ -29,6 +29,9 @@ wsctl desktop create \
   --user jonathan \
   --ssh-key-file ~/.ssh/id_ed25519.pub \
   --idle-timeout 3600
+
+# Optional: request reverse-tunnel connectivity (requires operator + gateway relay config)
+# wsctl desktop create ... --connectivity relay
 ```
 
 List:

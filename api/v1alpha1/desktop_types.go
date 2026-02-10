@@ -16,6 +16,9 @@ type DesktopSpec struct {
 
 	SSH DesktopSSHSpec `json:"ssh,omitempty"`
 
+	// Connectivity controls how the access gateway reaches this Desktop.
+	Connectivity DesktopConnectivitySpec `json:"connectivity,omitempty"`
+
 	Home DesktopHomeSpec `json:"home,omitempty"`
 
 	// Resources applied to the desktop container.
@@ -39,6 +42,22 @@ type DesktopSpec struct {
 type DesktopSSHSpec struct {
 	// AuthorizedKeys are SSH public keys allowed to access this desktop.
 	AuthorizedKeys []string `json:"authorizedKeys,omitempty"`
+}
+
+type DesktopConnectivityMode string
+
+const (
+	DesktopConnectivityModePortForward DesktopConnectivityMode = "portforward"
+	DesktopConnectivityModeRelay       DesktopConnectivityMode = "relay"
+)
+
+type DesktopConnectivitySpec struct {
+	// Mode selects the connectivity mode for this Desktop.
+	// portforward (default): use ws-proxy on the gateway (Kubernetes API port-forward).
+	// relay: use an in-pod ws-desktop-agent sidecar that maintains an outbound
+	// connection to ws-relayd on the gateway (no gateway kubeconfig).
+	// +kubebuilder:validation:Enum=portforward;relay
+	Mode DesktopConnectivityMode `json:"mode,omitempty"`
 }
 
 type DesktopHomeSpec struct {

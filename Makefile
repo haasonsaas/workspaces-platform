@@ -32,3 +32,6 @@ images:
 	$(DOCKER) build -t $(REGISTRY)/workspaces-desktop:$(TAG) -f images/desktop/Dockerfile .
 	$(DOCKER) build -t $(REGISTRY)/workspaces-auditship:$(TAG) -f images/auditship/Dockerfile .
 	$(DOCKER) build -t $(REGISTRY)/workspaces-ws-proxy:$(TAG) -f images/ws-proxy/Dockerfile .
+	$(DOCKER) build -t $(REGISTRY)/workspaces-ws-desktop-agent:$(TAG) -f images/ws-desktop-agent/Dockerfile .
+	$(DOCKER) build -t $(REGISTRY)/workspaces-ws-relay:$(TAG) -f images/ws-relay/Dockerfile .
+	$(DOCKER) build -t $(REGISTRY)/workspaces-ws-relayd:$(TAG) -f images/ws-relayd/Dockerfile .

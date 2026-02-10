@@ -2,15 +2,20 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -34,9 +39,19 @@ type DesktopReconciler struct {
 	Scheme *runtime.Scheme
 
 	DefaultDesktopImage string
+
+	// Relay-mode (reverse tunnel) settings.
+	DesktopRelayAgentImage   string
+	DesktopRelaydControlAddr string
+	DesktopRelaydDataAddr    string
+	DesktopRelayJWTSecret    []byte
+	DesktopRelayJWTTTL       time.Duration
 }
 
 const annotationLastActiveAt = "workspaces.platform.dev/last-active-at"
+const annotationRelayTokenSHA256 = "workspaces.platform.dev/relay-token-sha256"
+
+const desktopCondRelayConfigured = "RelayConfigured"
 
 func (r *DesktopReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var desk workspacesv1alpha1.Desktop
@@ -93,6 +108,36 @@ func (r *DesktopReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		secProfile = "standard"
 	}
 	labels[labelPolicy] = secProfile
+
+	// Optional: reverse-tunnel "relay" mode.
+	connectivityMode := desk.Spec.Connectivity.Mode
+	if strings.TrimSpace(string(connectivityMode)) == "" {
+		connectivityMode = workspacesv1alpha1.DesktopConnectivityModePortForward
+	}
+	wantRelay := connectivityMode == workspacesv1alpha1.DesktopConnectivityModeRelay
+	relayKey := desk.Namespace + "/" + desk.Name
+	relayTokenSHA := ""
+
+	if wantRelay {
+		if strings.TrimSpace(r.DesktopRelayAgentImage) == "" ||
+			strings.TrimSpace(r.DesktopRelaydControlAddr) == "" ||
+			strings.TrimSpace(r.DesktopRelaydDataAddr) == "" ||
+			len(r.DesktopRelayJWTSecret) == 0 {
+			_ = r.setDesktopRelayCondition(ctx, &desk, false, "MissingConfig", "relay mode requested but operator relay config is incomplete")
+		} else {
+			sha, err := r.ensureDesktopRelaySecret(ctx, &desk, labels, relayKey)
+			if err != nil {
+				_ = r.setDesktopRelayCondition(ctx, &desk, false, "SecretError", err.Error())
+				return ctrl.Result{}, err
+			}
+			relayTokenSHA = sha
+			_ = r.setDesktopRelayCondition(ctx, &desk, true, "Configured", "relay mode configured")
+		}
+	} else {
+		// Best-effort: remove relay token Secret when relay mode is disabled.
+		_ = r.clearDesktopRelayCondition(ctx, &desk)
+		_ = r.deleteDesktopRelaySecret(ctx, &desk)
+	}
 
 	// Track the active home PVC in status so we can support snapshot-based reset
 	// without deleting/recreating the Desktop object.
@@ -207,6 +252,16 @@ func (r *DesktopReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		deploy.Spec.Strategy = appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
 		deploy.Spec.Selector = &metav1.LabelSelector{MatchLabels: labels}
 		deploy.Spec.Template.ObjectMeta.Labels = labels
+		if deploy.Spec.Template.ObjectMeta.Annotations == nil {
+			deploy.Spec.Template.ObjectMeta.Annotations = map[string]string{}
+		}
+		if relayTokenSHA != "" {
+			// Force a rollout when the relay token Secret rotates, without leaking
+			// the token itself into the Deployment spec.
+			deploy.Spec.Template.ObjectMeta.Annotations[annotationRelayTokenSHA256] = relayTokenSHA
+		} else {
+			delete(deploy.Spec.Template.ObjectMeta.Annotations, annotationRelayTokenSHA256)
+		}
 
 		podSpec := &deploy.Spec.Template.Spec
 		podSpec.AutomountServiceAccountToken = ptrTo(false)
@@ -229,7 +284,7 @@ func (r *DesktopReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			},
 		}
 
-		podSpec.Containers = []corev1.Container{
+		containers := []corev1.Container{
 			{
 				Name:  "desktop",
 				Image: desiredImage,
@@ -250,6 +305,40 @@ func (r *DesktopReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				},
 			},
 		}
+
+		// Relay mode: inject a ws-desktop-agent sidecar to maintain an outbound reverse-tunnel
+		// connection to ws-relayd on the gateway.
+		if wantRelay && relayTokenSHA != "" {
+			relaySecretName := fmt.Sprintf("desktop-%s-relay", desk.Name)
+			containers = append(containers, corev1.Container{
+				Name:  "ws-desktop-agent",
+				Image: strings.TrimSpace(r.DesktopRelayAgentImage),
+				Env: []corev1.EnvVar{
+					{Name: "WS_RELAYD_CONTROL_ADDR", Value: strings.TrimSpace(r.DesktopRelaydControlAddr)},
+					{Name: "WS_RELAYD_DATA_ADDR", Value: strings.TrimSpace(r.DesktopRelaydDataAddr)},
+					{Name: "WS_RELAY_KEY", Value: relayKey},
+					{
+						Name: "WS_RELAY_TOKEN",
+						ValueFrom: &corev1.EnvVarSource{
+							SecretKeyRef: &corev1.SecretKeySelector{
+								LocalObjectReference: corev1.LocalObjectReference{Name: relaySecretName},
+								Key:                  "token",
+							},
+						},
+					},
+					{Name: "WS_RELAY_CONCURRENCY", Value: "4"},
+				},
+				SecurityContext: &corev1.SecurityContext{
+					AllowPrivilegeEscalation: ptrTo(false),
+					ReadOnlyRootFilesystem:   ptrTo(true),
+					RunAsNonRoot:             ptrTo(true),
+					RunAsUser:                ptrTo(int64(1000)),
+					Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+					SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+				},
+			})
+		}
+		podSpec.Containers = containers
 
 		return controllerutil.SetControllerReference(&desk, deploy, r.Scheme)
 	})
@@ -481,4 +570,141 @@ func (r *DesktopReconciler) enforceHomeRetention(ctx context.Context, desk *work
 		_ = r.Delete(ctx, &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: p.name, Namespace: desk.Namespace}})
 	}
 	return nil
+}
+
+func (r *DesktopReconciler) deleteDesktopRelaySecret(ctx context.Context, desk *workspacesv1alpha1.Desktop) error {
+	secretName := fmt.Sprintf("desktop-%s-relay", desk.Name)
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: desk.Namespace}}
+	err := r.Delete(ctx, secret)
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
+func (r *DesktopReconciler) ensureDesktopRelaySecret(ctx context.Context, desk *workspacesv1alpha1.Desktop, labels map[string]string, relayKey string) (tokenSHA256 string, _ error) {
+	secretName := fmt.Sprintf("desktop-%s-relay", desk.Name)
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: desk.Namespace}}
+
+	ttl := r.DesktopRelayJWTTTL
+	if ttl <= 0 {
+		ttl = 24 * time.Hour
+	}
+	// Rotate shortly before expiry so a long-running desktop doesn't flap at the boundary.
+	renewBefore := 10 * time.Minute
+
+	now := time.Now().UTC()
+	chosenToken := ""
+
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, secret, func() error {
+		if secret.Labels == nil {
+			secret.Labels = map[string]string{}
+		}
+		for k, v := range labels {
+			secret.Labels[k] = v
+		}
+		secret.Type = corev1.SecretTypeOpaque
+		if secret.Data == nil {
+			secret.Data = map[string][]byte{}
+		}
+		secret.Data["key"] = []byte(relayKey)
+
+		// Reuse an existing token if it is still valid far enough into the future.
+		if rawTok := strings.TrimSpace(string(secret.Data["token"])); rawTok != "" {
+			if rawExp := strings.TrimSpace(string(secret.Data["expires_at"])); rawExp != "" {
+				if t, err := time.Parse(time.RFC3339Nano, rawExp); err == nil {
+					if t.After(now.Add(renewBefore)) {
+						chosenToken = rawTok
+						return controllerutil.SetControllerReference(desk, secret, r.Scheme)
+					}
+				} else if t, err := time.Parse(time.RFC3339, rawExp); err == nil {
+					if t.After(now.Add(renewBefore)) {
+						chosenToken = rawTok
+						return controllerutil.SetControllerReference(desk, secret, r.Scheme)
+					}
+				}
+			}
+		}
+
+		tok, exp, err := mintDesktopRelayJWT(r.DesktopRelayJWTSecret, relayKey, ttl)
+		if err != nil {
+			return err
+		}
+		chosenToken = tok
+		secret.Data["token"] = []byte(tok)
+		secret.Data["expires_at"] = []byte(exp.Format(time.RFC3339Nano))
+
+		return controllerutil.SetControllerReference(desk, secret, r.Scheme)
+	})
+	if err != nil {
+		return "", err
+	}
+	return sha256Hex(chosenToken), nil
+}
+
+func mintDesktopRelayJWT(secret []byte, relayKey string, ttl time.Duration) (token string, expiresAt time.Time, _ error) {
+	now := time.Now().UTC()
+	if ttl <= 0 {
+		ttl = 24 * time.Hour
+	}
+	expiresAt = now.Add(ttl)
+
+	claims := &jwt.RegisteredClaims{
+		Subject:   strings.TrimSpace(relayKey),
+		Issuer:    "workspaces-operator",
+		IssuedAt:  jwt.NewNumericDate(now),
+		ExpiresAt: jwt.NewNumericDate(expiresAt),
+	}
+	t := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := t.SignedString(secret)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return signed, expiresAt, nil
+}
+
+func sha256Hex(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+func (r *DesktopReconciler) setDesktopRelayCondition(ctx context.Context, desk *workspacesv1alpha1.Desktop, ok bool, reason, msg string) error {
+	condStatus := metav1.ConditionFalse
+	if ok {
+		condStatus = metav1.ConditionTrue
+	}
+
+	cond := metav1.Condition{
+		Type:               desktopCondRelayConfigured,
+		Status:             condStatus,
+		Reason:             reason,
+		Message:            msg,
+		ObservedGeneration: desk.Generation,
+		LastTransitionTime: metav1.Now(),
+	}
+
+	before := desk.DeepCopy()
+	meta.SetStatusCondition(&desk.Status.Conditions, cond)
+	if reflect.DeepEqual(before.Status.Conditions, desk.Status.Conditions) {
+		return nil
+	}
+	return r.Status().Patch(ctx, desk, client.MergeFrom(before))
+}
+
+func (r *DesktopReconciler) clearDesktopRelayCondition(ctx context.Context, desk *workspacesv1alpha1.Desktop) error {
+	before := desk.DeepCopy()
+
+	out := make([]metav1.Condition, 0, len(desk.Status.Conditions))
+	for _, c := range desk.Status.Conditions {
+		if c.Type == desktopCondRelayConfigured {
+			continue
+		}
+		out = append(out, c)
+	}
+	desk.Status.Conditions = out
+
+	if reflect.DeepEqual(before.Status.Conditions, desk.Status.Conditions) {
+		return nil
+	}
+	return r.Status().Patch(ctx, desk, client.MergeFrom(before))
 }

@@ -41,6 +41,21 @@ spec:
           spec:
             description: DesktopSpec defines the desired state of Desktop.
             properties:
+              connectivity:
+                description: Connectivity controls how the access gateway reaches
+                  this Desktop.
+                properties:
+                  mode:
+                    description: |-
+                      Mode selects the connectivity mode for this Desktop.
+                      portforward (default): use ws-proxy on the gateway (Kubernetes API port-forward).
+                      relay: use an in-pod ws-desktop-agent sidecar that maintains an outbound
+                      connection to ws-relayd on the gateway (no gateway kubeconfig).
+                    enum:
+                    - portforward
+                    - relay
+                    type: string
+                type: object
               home:
                 properties:
                   reset:

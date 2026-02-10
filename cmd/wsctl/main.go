@@ -90,15 +90,16 @@ func cmdDesktop(args []string) {
 	case "create":
 		fs := flag.NewFlagSet("desktop create", flag.ExitOnError)
 		var (
-			name       = fs.String("name", "", "Desktop name")
-			namespace  = fs.String("namespace", "desktops", "Namespace")
-			user       = fs.String("user", "", "Linux username in the desktop")
-			image      = fs.String("image", "", "Desktop image (optional)")
-			sshKeyFile = fs.String("ssh-key-file", "", "Path to SSH public key file")
-			homeSize   = fs.String("home-size", "50Gi", "Home PVC size (e.g. 50Gi)")
-			storageCls = fs.String("storage-class", "", "Home PVC storage class (optional)")
-			idleTO     = fs.Int("idle-timeout", 0, "Idle timeout seconds (0 disables autosuspend)")
-			suspended  = fs.Bool("suspended", false, "Create suspended (replicas=0)")
+			name         = fs.String("name", "", "Desktop name")
+			namespace    = fs.String("namespace", "desktops", "Namespace")
+			user         = fs.String("user", "", "Linux username in the desktop")
+			image        = fs.String("image", "", "Desktop image (optional)")
+			sshKeyFile   = fs.String("ssh-key-file", "", "Path to SSH public key file")
+			homeSize     = fs.String("home-size", "50Gi", "Home PVC size (e.g. 50Gi)")
+			storageCls   = fs.String("storage-class", "", "Home PVC storage class (optional)")
+			connectivity = fs.String("connectivity", "portforward", "Connectivity: portforward (ws-proxy) or relay (reverse tunnel)")
+			idleTO       = fs.Int("idle-timeout", 0, "Idle timeout seconds (0 disables autosuspend)")
+			suspended    = fs.Bool("suspended", false, "Create suspended (replicas=0)")
 		)
 		fs.Parse(args[1:])
 
@@ -108,6 +109,16 @@ func cmdDesktop(args []string) {
 		}
 		if *idleTO < 0 {
 			die("idle-timeout must be >= 0")
+		}
+
+		conn := strings.ToLower(strings.TrimSpace(*connectivity))
+		if conn == "" {
+			conn = "portforward"
+		}
+		switch conn {
+		case "portforward", "relay":
+		default:
+			die("invalid --connectivity (expected portforward|relay)")
 		}
 
 		keyBytes, err := os.ReadFile(*sshKeyFile)
@@ -135,6 +146,9 @@ func cmdDesktop(args []string) {
 				User:  strings.TrimSpace(*user),
 				Image: strings.TrimSpace(*image),
 				SSH:   workspacesv1alpha1.DesktopSSHSpec{AuthorizedKeys: []string{pubKey}},
+				Connectivity: workspacesv1alpha1.DesktopConnectivitySpec{
+					Mode: workspacesv1alpha1.DesktopConnectivityMode(conn),
+				},
 				Home: workspacesv1alpha1.DesktopHomeSpec{
 					StorageClassName: scn,
 					Size:             strings.TrimSpace(*homeSize),
@@ -185,7 +199,11 @@ func cmdDesktop(args []string) {
 		defer cancel()
 		dieIf(k.List(ctx, &list, client.InNamespace(*namespace)))
 		for _, d := range list.Items {
-			fmt.Printf("%s/%s phase=%s service=%s\n", d.Namespace, d.Name, d.Status.Phase, d.Status.ServiceName)
+			mode := strings.TrimSpace(string(d.Spec.Connectivity.Mode))
+			if mode == "" {
+				mode = "portforward"
+			}
+			fmt.Printf("%s/%s phase=%s connectivity=%s service=%s\n", d.Namespace, d.Name, d.Status.Phase, mode, d.Status.ServiceName)
 		}
 
 	case "delete":

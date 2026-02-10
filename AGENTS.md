@@ -67,6 +67,10 @@ Creates:
 
 The container listens on `2222`; Service exposes port `22` and targets `2222`.
 
+Connectivity:
+- `portforward` (default): gateway uses `ws-proxy` (Kubernetes API port-forward).
+- `relay`: operator injects a `ws-desktop-agent` sidecar and mints a per-desktop JWT for `ws-relayd` on the gateway (no gateway kubeconfig).
+
 ### `AgentJob`
 
 Creates a Kubernetes `Job` (typically on Kata via `runtimeClassName`), with:
