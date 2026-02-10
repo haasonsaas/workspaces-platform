@@ -58,6 +58,7 @@ coderd can reverse-proxy to agent ports without exposing the workspace network d
 Landmarks:
 - `coderd/workspaceapps/` (reverse proxy to agent)
 - `coderd/portsharing/`
+- `codersdk/workspaceagentportshare.go` (share levels + protocol hints)
 
 ### 5) Auditing Is First-Class In The Control Plane
 
@@ -101,12 +102,16 @@ It’s more moving parts, so it should be an optional profile, not a day-1 requi
 
 Coder’s “apps/port sharing” is a useful model for preview URLs:
 - explicit user intent (“share port 3000”)
-- scoped TTL and share levels
+- scoped TTL and share levels (`owner`, `authenticated`, `organization`, `public`)
 - audit trail for exposures
 
 We should implement this as a CRD instead of ad-hoc port-forwarding:
 - `PortShare` (or `WorkspaceApp`) referencing a Desktop and a port
 - gateway (or in-cluster proxy) enforces auth + routes to the desktop
+
+Coder also enforces a template-level "max port share level". The analogous control for us is:
+- enforce allowed share levels per Desktop security profile (or per repo/org policy)
+- default-deny `public` unless explicitly enabled
 
 ## What We Probably Should Not Copy
 

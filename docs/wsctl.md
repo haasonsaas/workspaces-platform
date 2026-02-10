@@ -142,3 +142,20 @@ wsctl github open-pr \
   --title 'Fix thing' \
   --patch-file /tmp/patch.diff
 ```
+
+## PortShare
+
+Create a shared port entry (Coder-style concept; this currently creates a ClusterIP Service that targets the Desktop pods on the given port):
+```bash
+wsctl portshare create --desktop jonathan --port 3000 --share-level owner --protocol http --ttl 3600
+```
+
+List:
+```bash
+wsctl portshare list
+```
+
+Delete:
+```bash
+wsctl portshare delete --name ps-jonathan-3000
+```

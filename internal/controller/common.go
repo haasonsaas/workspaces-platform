@@ -1,8 +1,9 @@
 package controller
 
 const (
-	labelApp      = "workspaces.platform.dev/app"
-	labelDesktop  = "workspaces.platform.dev/desktop"
-	labelAgentJob = "workspaces.platform.dev/agentjob"
-	labelPolicy   = "workspaces.platform.dev/policy-profile"
+	labelApp       = "workspaces.platform.dev/app"
+	labelDesktop   = "workspaces.platform.dev/desktop"
+	labelAgentJob  = "workspaces.platform.dev/agentjob"
+	labelPolicy    = "workspaces.platform.dev/policy-profile"
+	labelPortShare = "workspaces.platform.dev/portshare"
 )

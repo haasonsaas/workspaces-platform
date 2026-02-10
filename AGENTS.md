@@ -90,6 +90,14 @@ MVP constraints (enforced by controller):
 - `dnsAllow` can be used to allow DNS resolution for additional names (e.g. CNAME targets) without granting direct egress to those names
 - DNS allow rules are capped (default max `50` unique names; configure via `NETWORKGRANT_MAX_DNS_NAMES` or `--networkgrant-max-dns-names`)
 
+### `PortShare`
+
+Creates:
+- a ClusterIP Service that targets Desktop pods on `spec.port`
+
+Purpose:
+- a Coder-style “share this port” primitive that can later drive preview URLs and access control in a gateway/proxy
+
 ## Capability Broker (Choke Point)
 
 The broker should become the only way agents can:

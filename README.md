@@ -36,6 +36,7 @@ Docs:
 - `docs/troubleshooting.md`
 - `docs/longhorn.md`
 - `docs/research-coder.md`
+- `docs/portshare.md`
 
 This repo is an MVP that compiles and deploys manifests, but you still need to wire:
 - image build/publish for operator/broker/desktop/agent images

@@ -166,6 +166,7 @@ func cmdDoctor(args []string) {
 				"agentjobs.workspaces.platform.dev",
 				"hometemplates.workspaces.platform.dev",
 				"networkgrants.workspaces.platform.dev",
+				"portshares.workspaces.platform.dev",
 			} {
 				if _, err := getCRD(ctx, dyn, n); err != nil {
 					return "", "Apply the base manifests: `kubectl apply -k k8s`.", err

@@ -120,6 +120,7 @@ CRDs:
 - `Desktop` → Deployment + Service + Secret (authorized_keys) + PVC (home)
 - `AgentJob` → Kubernetes Job (Kata runtime class by default)
 - `NetworkGrant` → CiliumNetworkPolicy (FQDN egress, TTL)
+- `PortShare` → ClusterIP Service targeting a Desktop port (future: preview URLs + share-level enforcement)
 
 Key conventions:
 - Labels:

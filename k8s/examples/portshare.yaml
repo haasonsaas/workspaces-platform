@@ -1,0 +1,13 @@
+apiVersion: workspaces.platform.dev/v1alpha1
+kind: PortShare
+metadata:
+  name: ps-jonathan-3000
+  namespace: desktops
+spec:
+  desktopRef:
+    name: jonathan
+  port: 3000
+  protocol: http
+  shareLevel: owner
+  ttlSeconds: 3600
+
