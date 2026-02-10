@@ -21,6 +21,7 @@ Docs:
 - `docs/mvp.md`
 - `docs/overlays.md`
 - `docs/access.md`
+- `docs/connectivity.md`
 - `docs/security.md`
 - `docs/audit.md`
 - `docs/ci.md`

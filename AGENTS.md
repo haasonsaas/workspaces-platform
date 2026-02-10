@@ -31,6 +31,9 @@ The platform must enforce:
 - `cmd/workspaces-operator/`: controller-manager binary.
 - `cmd/capability-broker/`: capability broker HTTP API (network unlocks; GitHub PR creation is implemented here).
 - `cmd/ws-proxy/`: gateway helper for SSH `ProxyCommand` (default: K8s port-forward; see `docs/access.md`).
+- `cmd/ws-relayd/`: **experimental** reverse-tunnel relay daemon (gateway host; see `docs/connectivity.md`).
+- `cmd/ws-relay/`: **experimental** ProxyCommand client for `ws-relayd` (gateway host; see `docs/connectivity.md`).
+- `cmd/ws-desktop-agent/`: **experimental** in-desktop reverse-tunnel agent (see `docs/connectivity.md`).
 - `cmd/github-webhook/`: optional GitHub webhook bridge (PR comment approvals for `NetworkGrant`).
 - `cmd/wsctl/`: CLI for creating desktops/agentjobs and calling broker APIs.
 - `k8s/`: kustomize base (CRDs, namespaces, operator, broker, baseline policies).

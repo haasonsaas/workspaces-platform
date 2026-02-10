@@ -98,6 +98,10 @@ Coder’s pattern suggests an alternative:
 This would reduce “gateway compromise” blast radius by removing direct apiserver capabilities.
 It’s more moving parts, so it should be an optional profile, not a day-1 requirement.
 
+This repo now includes an **experimental** proof-of-concept skeleton:
+- `cmd/ws-relayd`, `cmd/ws-relay`, `cmd/ws-desktop-agent`
+- design notes: `docs/connectivity.md`
+
 ### C) Port Sharing As A First-Class CRD (Future)
 
 Coder’s “apps/port sharing” is a useful model for preview URLs:

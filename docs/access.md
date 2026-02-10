@@ -60,3 +60,9 @@ Host desk-jonathan
 ```
 
 If you enable this mode, assume that compromising the gateway meaningfully increases the blast radius.
+
+## Experimental: Reverse Tunnel Mode (No Gateway Kubeconfig)
+
+This repo includes an experimental "desktop agent reverse tunnel" design to remove Kubernetes API credentials from the gateway.
+
+See: `docs/connectivity.md`.
